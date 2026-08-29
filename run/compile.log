@@ -1,0 +1,54 @@
+
+Warning-[LNX_OS_VERUN] Unsupported Linux version
+  Linux version 'Rocky Linux release 8.10 (Green Obsidian)' is not supported 
+  on 'x86_64' officially, assuming linux compatibility by default. Set 
+  VCS_ARCH_OVERRIDE to linux or suse32 to override.
+  Please refer to release notes for information on supported platforms.
+
+Command: vcs -full64 -sverilog -timescale=1ns/1ps +define+FSDB -kdb -lca +vcs+lic+wait \
+-debug_access+all -debug_region+cell+encrypt -l /home/student/Desktop/034_Honours/Project/run/compile.log \
+-o /home/student/Desktop/034_Honours/Project/run/simv /home/student/Desktop/034_Honours/Project/rtl/interconnect/priority_encoder.v \
+/home/student/Desktop/034_Honours/Project/rtl/interconnect/arbiter.v /home/student/Desktop/034_Honours/Project/rtl/interconnect/axi_interconnect.v \
+/home/student/Desktop/034_Honours/Project/run/axi_interconnect_wrap_5x16.v /home/student/Desktop/034_Honours/Project/tb/tb_axi_interconnect_5x16.sv \
+
+                         Chronologic VCS (TM)
+         Version U-2023.03_Full64 -- Sat Aug 29 15:44:14 2026
+
+                    Copyright (c) 1991 - 2023 Synopsys, Inc.
+   This software and the associated documentation are proprietary to Synopsys,
+ Inc. This software may only be used in accordance with the terms and conditions
+ of a written license agreement with Synopsys, Inc. All other use, reproduction,
+   or distribution of this software is strictly prohibited.  Licensed Products
+     communicate with Synopsys servers for the purpose of providing software
+    updates, detecting software piracy and verifying that customers are using
+    Licensed Products in conformity with the applicable License Key for such
+  Licensed Products. Synopsys will use information gathered in connection with
+    this process to deliver software updates and pursue software pirates and
+                                   infringers.
+
+ Inclusivity & Diversity - Visit SolvNetPlus to read the "Synopsys Statement on
+            Inclusivity and Diversity" (Refer to article 000036315 at
+                        https://solvnetplus.synopsys.com)
+
+
+Warning-[LCA_FEATURES_ENABLED] Usage warning
+  LCA features enabled by '-lca' argument on the command line.  For more 
+  information regarding list of LCA features please refer to Chapter "LCA 
+  features" in the VCS Release Notes
+
+Parsing design file '/home/student/Desktop/034_Honours/Project/rtl/interconnect/priority_encoder.v'
+Parsing design file '/home/student/Desktop/034_Honours/Project/rtl/interconnect/arbiter.v'
+Parsing design file '/home/student/Desktop/034_Honours/Project/rtl/interconnect/axi_interconnect.v'
+Parsing design file '/home/student/Desktop/034_Honours/Project/run/axi_interconnect_wrap_5x16.v'
+Parsing design file '/home/student/Desktop/034_Honours/Project/tb/tb_axi_interconnect_5x16.sv'
+
+Error-[UC] Unexpected character
+  The character 'M' is illegal in the context. 
+  "/home/student/Desktop/034_Honours/Project/tb/tb_axi_interconnect_5x16.sv", 
+  1060
+  Source info:             axi_write(0, 32'h0000_0100, 32'hM0_S0_00, 4'hF, 
+  8'h20);
+
+1 warning
+1 error
+CPU time: .103 seconds to compile
