@@ -1,59 +1,94 @@
-# wave.rc  –  Verdi waveform configuration
-# Loaded automatically when Verdi opens the FSDB with -sswr wave.rc
+Magic 271485
+Revision Verdi_U-2023.03-SP1
 
-# Open the signal window
-wvCreateGroup "Clock & Reset"
-wvAddSignal -group "Clock & Reset" tb_axi_interconnect_5x16.clk
-wvAddSignal -group "Clock & Reset" tb_axi_interconnect_5x16.rst
+; Window Layout <x> <y> <width> <height> <signalwidth> <valuewidth>
+viewPort -10 19 1600 836 180 80
 
-wvCreateGroup "DUT State"
-wvAddSignal -group "DUT State" tb_axi_interconnect_5x16.dut.axi_interconnect_inst.state_reg
+; File list:
+; openDirFile [-d delimiter] [-s time_offset] [-rf auto_bus_rule_file] path_name file_name
+openDirFile -d / -i 0 "" "/home/student/Desktop/034_Honours/Project/run/tb_axi_interconnect_5x16.fsdb"
 
-wvCreateGroup "Master 0 (AW/W/B)"
-wvAddSignal -group "Master 0 (AW/W/B)" tb_axi_interconnect_5x16.s_awvalid[0]
-wvAddSignal -group "Master 0 (AW/W/B)" tb_axi_interconnect_5x16.s_awready[0]
-wvAddSignal -group "Master 0 (AW/W/B)" tb_axi_interconnect_5x16.s_awaddr[0]
-wvAddSignal -group "Master 0 (AW/W/B)" tb_axi_interconnect_5x16.s_wvalid[0]
-wvAddSignal -group "Master 0 (AW/W/B)" tb_axi_interconnect_5x16.s_wready[0]
-wvAddSignal -group "Master 0 (AW/W/B)" tb_axi_interconnect_5x16.s_wdata[0]
-wvAddSignal -group "Master 0 (AW/W/B)" tb_axi_interconnect_5x16.s_wstrb[0]
-wvAddSignal -group "Master 0 (AW/W/B)" tb_axi_interconnect_5x16.s_bvalid[0]
-wvAddSignal -group "Master 0 (AW/W/B)" tb_axi_interconnect_5x16.s_bready[0]
-wvAddSignal -group "Master 0 (AW/W/B)" tb_axi_interconnect_5x16.s_bresp[0]
+; file time scale:
+; fileTimeScale ### s|ms|us|ns|ps
 
-wvCreateGroup "Master 0 (AR/R)"
-wvAddSignal -group "Master 0 (AR/R)" tb_axi_interconnect_5x16.s_arvalid[0]
-wvAddSignal -group "Master 0 (AR/R)" tb_axi_interconnect_5x16.s_arready[0]
-wvAddSignal -group "Master 0 (AR/R)" tb_axi_interconnect_5x16.s_araddr[0]
-wvAddSignal -group "Master 0 (AR/R)" tb_axi_interconnect_5x16.s_rvalid[0]
-wvAddSignal -group "Master 0 (AR/R)" tb_axi_interconnect_5x16.s_rready[0]
-wvAddSignal -group "Master 0 (AR/R)" tb_axi_interconnect_5x16.s_rdata[0]
-wvAddSignal -group "Master 0 (AR/R)" tb_axi_interconnect_5x16.s_rresp[0]
+; signal spacing:
+signalSpacing 5
 
-wvCreateGroup "Slave 0 (AW/W/B)"
-wvAddSignal -group "Slave 0 (AW/W/B)" tb_axi_interconnect_5x16.m_awvalid[0]
-wvAddSignal -group "Slave 0 (AW/W/B)" tb_axi_interconnect_5x16.m_awready[0]
-wvAddSignal -group "Slave 0 (AW/W/B)" tb_axi_interconnect_5x16.m_awaddr[0]
-wvAddSignal -group "Slave 0 (AW/W/B)" tb_axi_interconnect_5x16.m_wvalid[0]
-wvAddSignal -group "Slave 0 (AW/W/B)" tb_axi_interconnect_5x16.m_wready[0]
-wvAddSignal -group "Slave 0 (AW/W/B)" tb_axi_interconnect_5x16.m_wdata[0]
-wvAddSignal -group "Slave 0 (AW/W/B)" tb_axi_interconnect_5x16.m_bvalid[0]
-wvAddSignal -group "Slave 0 (AW/W/B)" tb_axi_interconnect_5x16.m_bready[0]
-wvAddSignal -group "Slave 0 (AW/W/B)" tb_axi_interconnect_5x16.m_bresp[0]
+; windowTimeUnit is used for zoom, cursor & marker
+; waveform viewport range
+zoom 7970976.562500 8224023.437500
+cursor 0.000000
+marker 0.000000
 
-wvCreateGroup "Slave 0 (AR/R)"
-wvAddSignal -group "Slave 0 (AR/R)" tb_axi_interconnect_5x16.m_arvalid[0]
-wvAddSignal -group "Slave 0 (AR/R)" tb_axi_interconnect_5x16.m_arready[0]
-wvAddSignal -group "Slave 0 (AR/R)" tb_axi_interconnect_5x16.m_araddr[0]
-wvAddSignal -group "Slave 0 (AR/R)" tb_axi_interconnect_5x16.m_rvalid[0]
-wvAddSignal -group "Slave 0 (AR/R)" tb_axi_interconnect_5x16.m_rready[0]
-wvAddSignal -group "Slave 0 (AR/R)" tb_axi_interconnect_5x16.m_rdata[0]
-wvAddSignal -group "Slave 0 (AR/R)" tb_axi_interconnect_5x16.m_rresp[0]
+; visible top row signal index
+top 0
+; marker line index
+markerPos 0
 
-wvCreateGroup "Arbiter"
-wvAddSignal -group "Arbiter" tb_axi_interconnect_5x16.dut.axi_interconnect_inst.grant
-wvAddSignal -group "Arbiter" tb_axi_interconnect_5x16.dut.axi_interconnect_inst.grant_valid
-wvAddSignal -group "Arbiter" tb_axi_interconnect_5x16.dut.axi_interconnect_inst.grant_encoded
+; event list
+; addEvent event_name event_expression
+; curEvent event_name
 
-# Zoom to fit on open
-wvZoomAll
+
+
+COMPLEX_EVENT_BEGIN
+
+
+COMPLEX_EVENT_END
+
+
+
+; toolbar current search type
+; curSTATUS search_type
+curSTATUS ByChange
+
+
+addGroup "Clock & Reset"
+activeDirFile "" "/home/student/Desktop/034_Honours/Project/run/tb_axi_interconnect_5x16.fsdb"
+addSignal -h 15 /tb_axi_interconnect_5x16/clk
+addSignal -h 15 -holdScope rst
+addGroup "Master 0 AW/W/B"
+addSignal -h 15 /tb_axi_interconnect_5x16/s_awvalid[0]
+addSignal -h 15 -holdScope s_awready[0]
+addSignal -h 15 -UNSIGNED -HEX -holdScope s_awaddr[0][31:0]
+addSignal -h 15 -holdScope s_wvalid[0]
+addSignal -h 15 -holdScope s_wready[0]
+addSignal -h 15 -UNSIGNED -HEX -holdScope s_wdata[0][31:0]
+addSignal -h 15 -UNSIGNED -HEX -holdScope s_wstrb[0][3:0]
+addSignal -h 15 -holdScope s_bvalid[0]
+addSignal -h 15 -holdScope s_bready[0]
+addSignal -h 15 -UNSIGNED -HEX -holdScope s_bresp[0][1:0]
+addGroup "Master 0 AR/R"
+addSignal -h 15 /tb_axi_interconnect_5x16/s_arvalid[0]
+addSignal -h 15 -holdScope s_arready[0]
+addSignal -h 15 -UNSIGNED -HEX -holdScope s_araddr[0][31:0]
+addSignal -h 15 -holdScope s_rvalid[0]
+addSignal -h 15 -holdScope s_rready[0]
+addSignal -h 15 -UNSIGNED -HEX -holdScope s_rdata[0][31:0]
+addSignal -h 15 -UNSIGNED -HEX -holdScope s_rresp[0][1:0]
+addGroup "Slave 0 AW/W/B"
+addSignal -h 15 /tb_axi_interconnect_5x16/m_awvalid[0]
+addSignal -h 15 -holdScope m_awready[0]
+addSignal -h 15 -UNSIGNED -HEX -holdScope m_awaddr[0][31:0]
+addSignal -h 15 -holdScope m_wvalid[0]
+addSignal -h 15 -holdScope m_wready[0]
+addSignal -h 15 -UNSIGNED -HEX -holdScope m_wdata[0][31:0]
+addSignal -h 15 -holdScope m_bvalid[0]
+addSignal -h 15 -holdScope m_bready[0]
+addSignal -h 15 -UNSIGNED -HEX -holdScope m_bresp[0][1:0]
+addGroup "Slave 0 AR/R"
+addSignal -h 15 /tb_axi_interconnect_5x16/m_arvalid[0]
+addSignal -h 15 -holdScope m_arready[0]
+addSignal -h 15 -UNSIGNED -HEX -holdScope m_araddr[0][31:0]
+addSignal -h 15 -holdScope m_rvalid[0]
+addSignal -h 15 -holdScope m_rready[0]
+addSignal -h 15 -UNSIGNED -HEX -holdScope m_rdata[0][31:0]
+addSignal -h 15 -UNSIGNED -HEX -holdScope m_rresp[0][1:0]
+addGroup "Arbiter"
+addSignal -h 15 -UNSIGNED -HEX /tb_axi_interconnect_5x16/dut/axi_interconnect_inst/grant[9:0]
+addSignal -h 15 -holdScope grant_valid
+addSignal -h 15 -UNSIGNED -HEX -holdScope grant_encoded[3:0]
+
+; getSignalForm Scope Hierarchy Status
+; active file of getSignalForm
+

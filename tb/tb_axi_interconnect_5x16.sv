@@ -32,7 +32,8 @@ localparam M_COUNT     = 16;
 // Each slave gets a 24-bit window (16 MB); base addresses auto-computed
 localparam SLAVE_WINDOW = 24;                      // bits
 localparam SLAVE_SIZE   = 1 << SLAVE_WINDOW;       // 16 MB per slave
-localparam MEM_WORDS    = SLAVE_SIZE / (DATA_WIDTH/8); // words per slave mem
+// MEM_WORDS kept for reference but memory is now associative (sparse)
+localparam MEM_WORDS    = SLAVE_SIZE / (DATA_WIDTH/8); // words per slave mem (unused for array sizing)
 
 localparam CLK_PERIOD   = 10;                      // ns  (100 MHz)
 localparam TIMEOUT_CYC  = 10_000;
@@ -524,8 +525,9 @@ axi_interconnect_wrap_5x16 dut (
 // ---------------------------------------------------------------------------
 // Slave BFM – 16 independent memory models, each 16 MB (24-bit window)
 // Responds to AW/W/AR channels; always OKAY response, zero latency on ready
+// Sparse associative arrays avoid the VCS MSOME module-size limit.
 // ---------------------------------------------------------------------------
-logic [DATA_WIDTH-1:0] slave_mem [M_COUNT][MEM_WORDS];
+logic [DATA_WIDTH-1:0] slave_mem [M_COUNT][int];
 
 // Slave index from address: base[i] = i * SLAVE_SIZE
 function automatic int addr_to_slave(input logic [ADDR_WIDTH-1:0] addr);
@@ -537,48 +539,13 @@ function automatic int addr_to_offset(input logic [ADDR_WIDTH-1:0] addr);
     return int'((addr & (SLAVE_SIZE-1)) >> 2);  // byte→word
 endfunction
 
-genvar gi;
-generate
-for (gi = 0; gi < M_COUNT; gi++) begin : gen_slave_bfm
+// ---------------------------------------------------------------------------
+// Slave BFM state machine variables – declared per-slave in the write/read
+// generate blocks below.  (gen_slave_bfm stub removed – it conflicted.)
+// ---------------------------------------------------------------------------
 
-    // Write channel
-    always @(posedge clk) begin : aw_proc
-        m_awready[gi] <= 1'b1;   // always ready
-        m_wready[gi]  <= 1'b1;
-        m_bvalid[gi]  <= 1'b0;
-        m_bid[gi]     <= '0;
-        m_bresp[gi]   <= 2'b00;
-
-        if (!rst) begin
-            // latch write address then accept data
-            if (m_awvalid[gi] && m_awready[gi]) begin
-                // address captured combinatorially via BFM logic below
-            end
-            if (m_wvalid[gi] && m_wready[gi]) begin
-                // data captured combinatorially below
-            end
-        end
-    end
-
-    // Sequential slave BFM using a simple state machine
-    typedef enum logic [1:0] {
-        SLV_IDLE, SLV_DATA, SLV_BRESP
-    } slv_state_t;
-
-    slv_state_t slv_state[M_COUNT];
-
-    logic [ADDR_WIDTH-1:0] slv_addr  [M_COUNT];
-    logic [7:0]            slv_len   [M_COUNT];
-    logic [2:0]            slv_size  [M_COUNT];
-    logic [1:0]            slv_burst [M_COUNT];
-    logic [ID_WIDTH-1:0]   slv_wid   [M_COUNT];
-    logic [7:0]            slv_beat  [M_COUNT];
-
-end
-endgenerate
-
-// Implement the actual slave BFM logic outside the generate for readability
-// (generate only created the type/variable declarations above)
+// Pre-simulation initialisation of slave-side output signals.
+// The sequential BFMs (slv_wr_bfm / slv_rd_bfm) take over once clk starts.
 initial begin
     for (int s = 0; s < M_COUNT; s++) begin
         m_awready[s] = 1'b1;
@@ -592,8 +559,8 @@ initial begin
         m_rdata[s]   = '0;
         m_rresp[s]   = 2'b00;
         m_rlast[s]   = 1'b0;
-        for (int w = 0; w < MEM_WORDS; w++)
-            slave_mem[s][w] = '0;
+        // slave_mem and ref_mem are associative – no pre-init needed;
+        // unwritten locations default to 0 via the BFM read path.
     end
 end
 
@@ -638,10 +605,16 @@ for (gs = 0; gs < M_COUNT; gs++) begin : slv_wr_bfm
             // Accept W beats
             if (m_wvalid[gs] && m_wready[gs]) begin
                 automatic int woff = addr_to_offset(wr_addr);
-                // byte-enable aware write
-                for (int b = 0; b < STRB_WIDTH; b++) begin
-                    if (m_wstrb[gs][b])
-                        slave_mem[gs][woff][b*8 +: 8] <= m_wdata[gs][b*8 +: 8];
+                // byte-enable aware write: build merged word in a temp, then
+                // assign whole word – VCS NYI bars part-select NBA on dynamic types
+                begin
+                    automatic logic [DATA_WIDTH-1:0] cur, merged;
+                    cur    = slave_mem[gs].exists(woff) ? slave_mem[gs][woff] : '0;
+                    merged = cur;
+                    for (int b = 0; b < STRB_WIDTH; b++)
+                        if (m_wstrb[gs][b])
+                            merged[b*8 +: 8] = m_wdata[gs][b*8 +: 8];
+                    slave_mem[gs][woff] <= merged;
                 end
                 // address increment for INCR burst
                 if (wr_burst == 2'b01)
@@ -710,7 +683,8 @@ for (gs = 0; gs < M_COUNT; gs++) begin : slv_rd_bfm
                     automatic int roff = addr_to_offset(rd_addr);
                     m_rvalid[gs] <= 1'b1;
                     m_rid[gs]    <= rd_id;
-                    m_rdata[gs]  <= slave_mem[gs][roff];
+                    // Return 0 for addresses never written (associative miss)
+                    m_rdata[gs]  <= slave_mem[gs].exists(roff) ? slave_mem[gs][roff] : '0;
                     m_rresp[gs]  <= 2'b00;
                     m_rlast[gs]  <= (rd_cnt == rd_len);
 
@@ -736,9 +710,8 @@ endgenerate
 // ---------------------------------------------------------------------------
 // Scoreboard / reference model
 // ---------------------------------------------------------------------------
-// Shadow memory: scoreboard mirrors what the testbench writes so we can
-// verify reads without relying on the slave BFM directly.
-logic [DATA_WIDTH-1:0] ref_mem [M_COUNT][MEM_WORDS];
+// Shadow memory: associative (sparse) – mirrors writes for read-back checks.
+logic [DATA_WIDTH-1:0] ref_mem [M_COUNT][int];
 
 int pass_count = 0;
 int fail_count = 0;
@@ -747,8 +720,14 @@ task automatic sb_write(input int slave, input logic [ADDR_WIDTH-1:0] addr,
                         input logic [DATA_WIDTH-1:0] data,
                         input logic [STRB_WIDTH-1:0] strb);
     automatic int off = addr_to_offset(addr);
-    for (int b = 0; b < STRB_WIDTH; b++)
-        if (strb[b]) ref_mem[slave][off][b*8 +: 8] = data[b*8 +: 8];
+    begin
+        automatic logic [DATA_WIDTH-1:0] cur, merged;
+        cur    = ref_mem[slave].exists(off) ? ref_mem[slave][off] : '0;
+        merged = cur;
+        for (int b = 0; b < STRB_WIDTH; b++)
+            if (strb[b]) merged[b*8 +: 8] = data[b*8 +: 8];
+        ref_mem[slave][off] = merged;
+    end
 endtask
 
 task automatic sb_check(input int master_port,
@@ -756,11 +735,13 @@ task automatic sb_check(input int master_port,
                         input logic [DATA_WIDTH-1:0] got);
     automatic int slave = addr_to_slave(addr);
     automatic int off   = addr_to_offset(addr);
-    if (got === ref_mem[slave][off]) begin
+    automatic logic [DATA_WIDTH-1:0] expected;
+    expected = ref_mem[slave].exists(off) ? ref_mem[slave][off] : '0;
+    if (got === expected) begin
         pass_count++;
     end else begin
         $error("[FAIL] M%0d addr=0x%08h exp=0x%08h got=0x%08h",
-               master_port, addr, ref_mem[slave][off], got);
+               master_port, addr, expected, got);
         fail_count++;
     end
 endtask
@@ -920,10 +901,8 @@ initial begin
         s_arvalid[i] = '0;
         s_rready[i]  = '0;
     end
-    // initialise ref_mem
-    for (int s = 0; s < M_COUNT; s++)
-        for (int w = 0; w < MEM_WORDS; w++)
-            ref_mem[s][w] = '0;
+    // initialise ref_mem – associative, no explicit init needed
+    // (reads of unwritten entries return 0 by default in the scoreboard)
 end
 
 // ---------------------------------------------------------------------------
