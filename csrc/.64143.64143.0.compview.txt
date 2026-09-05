@@ -1,0 +1,9 @@
+{"vcs1":{"timestamp_begin":1788609702.999978779, "rt":2.20, "ut":0.52, "st":0.08}}
+{"vcselab":{"timestamp_begin":1788609705.230895412, "rt":1.43, "ut":0.13, "st":0.03}}
+{"link":{"timestamp_begin":1788609706.684478686, "rt":0.10, "ut":0.07, "st":0.03}}
+{"SNPS_VCS_INTERNAL_ROOT_START_TIME": 1788609702.748908265}
+{"VCS_COMP_START_TIME": 1788609702.748908265}
+{"VCS_COMP_END_TIME": 1788609706.856511872}
+{"VCS_USER_OPTIONS": "-full64 -sverilog -timescale=1ns/1ps +define+FSDB -kdb -lca +vcs+lic+wait -debug_access+all -debug_region+cell+encrypt -l /home/student/Desktop/Honours-34/Honours_Project/run/interconnect/compile.log -o /home/student/Desktop/Honours-34/Honours_Project/run/interconnect/simv /home/student/Desktop/Honours-34/Honours_Project/rtl/interconnect/priority_encoder.v /home/student/Desktop/Honours-34/Honours_Project/rtl/interconnect/arbiter.v /home/student/Desktop/Honours-34/Honours_Project/rtl/interconnect/axi_interconnect.v /home/student/Desktop/Honours-34/Honours_Project/rtl/interconnect/axi_interconnect_wrap_5x16.v /home/student/Desktop/Honours-34/Honours_Project/tb/tb_axi_interconnect_5x16.sv"}
+{"vcs1": {"peak_mem": 534408}}
+{"vcselab": {"peak_mem": 260452}}

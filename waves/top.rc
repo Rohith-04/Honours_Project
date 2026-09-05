@@ -1,0 +1,86 @@
+Magic 271485
+Revision Verdi_U-2023.03-SP1
+
+; ============================================================
+; honours_soc bring-up — Verdi Wave RC
+; Location: waves/top.rc  (survives make clean)
+; ============================================================
+
+; Window Layout <x> <y> <width> <height> <signalwidth> <valuewidth>
+viewPort 0 0 1600 900 220 100
+
+; FSDB file
+openDirFile -d / -i 0 "" "/home/student/Desktop/Honours-34/Honours_Project/run/top/tb_honours_soc.fsdb"
+
+; signal spacing
+signalSpacing 5
+
+zoom 0.000000 500000.000000
+cursor 0.000000
+marker 0.000000
+
+top 0
+markerPos 0
+
+COMPLEX_EVENT_BEGIN
+COMPLEX_EVENT_END
+
+curSTATUS ByChange
+
+; ============================================================
+; Group 1: Clock & Reset + SoC pins
+; ============================================================
+addGroup "Clock & Reset"
+addSignal -h 15 /tb_honours_soc/clk
+addSignal -h 15 -holdScope rst_n
+addSignal -h 15 -holdScope /tb_honours_soc/dut/uart_tx
+addSignal -h 15 -holdScope /tb_honours_soc/dut/uart_rx
+addSignal -h 15 -holdScope /tb_honours_soc/dut/uart_irq
+
+; ============================================================
+; Group 2: VeeR fetch (CPU -> xbar)
+; ============================================================
+addGroup "VeeR fetch"
+addSignal -h 15 -holdScope /tb_honours_soc/dut/ifu_arvalid
+addSignal -h 15 -UNSIGNED -HEX -holdScope /tb_honours_soc/dut/ifu_araddr[31:0]
+addSignal -h 15 -holdScope /tb_honours_soc/dut/ifu_arready
+addSignal -h 15 -holdScope /tb_honours_soc/dut/lsu_arvalid
+addSignal -h 15 -UNSIGNED -HEX -holdScope /tb_honours_soc/dut/lsu_araddr[31:0]
+addSignal -h 15 -holdScope /tb_honours_soc/dut/ifu_rvalid
+addSignal -h 15 -UNSIGNED -HEX -holdScope /tb_honours_soc/dut/xbar_s01_rdata[31:0]
+
+; ============================================================
+; Group 3: m00 DRAM stub (xbar -> mem)
+; ============================================================
+addGroup "m00 DRAM stub"
+addSignal -h 15 -holdScope /tb_honours_soc/dut/m00_arvalid
+addSignal -h 15 -holdScope /tb_honours_soc/dut/m00_arready
+addSignal -h 15 -UNSIGNED -HEX -holdScope /tb_honours_soc/dut/m00_araddr[31:0]
+addSignal -h 15 -holdScope /tb_honours_soc/dut/m00_rvalid
+addSignal -h 15 -holdScope /tb_honours_soc/dut/m00_rready
+addSignal -h 15 -UNSIGNED -HEX -holdScope /tb_honours_soc/dut/m00_rdata[31:0]
+addSignal -h 15 -UNSIGNED -HEX -holdScope /tb_honours_soc/dut/m00_rresp[1:0]
+
+; ============================================================
+; Group 4: m05 UART (xbar -> uart_wrap)
+; ============================================================
+addGroup "m05 UART"
+addSignal -h 15 -holdScope /tb_honours_soc/dut/m05_awvalid
+addSignal -h 15 -holdScope /tb_honours_soc/dut/m05_awready
+addSignal -h 15 -UNSIGNED -HEX -holdScope /tb_honours_soc/dut/m05_awaddr[31:0]
+addSignal -h 15 -UNSIGNED -HEX -holdScope /tb_honours_soc/dut/m05_wdata[31:0]
+addSignal -h 15 -holdScope /tb_honours_soc/dut/m05_bvalid
+addSignal -h 15 -UNSIGNED -HEX -holdScope /tb_honours_soc/dut/m05_bresp[1:0]
+addSignal -h 15 -holdScope /tb_honours_soc/dut/m05_arvalid
+addSignal -h 15 -holdScope /tb_honours_soc/dut/m05_arready
+addSignal -h 15 -UNSIGNED -HEX -holdScope /tb_honours_soc/dut/m05_rdata[31:0]
+addSignal -h 15 -UNSIGNED -HEX -holdScope /tb_honours_soc/dut/m05_rresp[1:0]
+
+; ============================================================
+; Group 5: xbar FSM + arbiter
+; ============================================================
+addGroup "xbar FSM"
+addSignal -h 15 -UNSIGNED -HEX /tb_honours_soc/dut/u_xbar/axi_interconnect_inst/state_reg[2:0]
+addSignal -h 15 -UNSIGNED -HEX -holdScope /tb_honours_soc/dut/u_xbar/axi_interconnect_inst/grant
+addSignal -h 15 -holdScope -holdScope grant_valid
+addSignal -h 15 -UNSIGNED -HEX -holdScope grant_encoded

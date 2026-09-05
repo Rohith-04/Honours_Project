@@ -1,0 +1,5 @@
+{"vcs1":{"timestamp_begin":1788609711.816062070, "rt":1.41, "ut":0.03, "st":0.02}}
+{"SNPS_VCS_INTERNAL_ROOT_START_TIME": 1788609711.564251519}
+{"VCS_COMP_START_TIME": 1788609711.564251519}
+{"VCS_COMP_END_TIME": 1788609713.243001657}
+{"VCS_USER_OPTIONS": "-full64 -sverilog -timescale=1ns/1ps +define+FSDB -kdb -lca +vcs+lic+wait -debug_access+all -debug_region+cell+encrypt -l /home/student/Desktop/Honours-34/Honours_Project/run/interconnect/compile.log -o /home/student/Desktop/Honours-34/Honours_Project/run/interconnect/simv /home/student/Desktop/Honours-34/Honours_Project/rtl/interconnect/priority_encoder.v /home/student/Desktop/Honours-34/Honours_Project/rtl/interconnect/arbiter.v /home/student/Desktop/Honours-34/Honours_Project/rtl/interconnect/axi_interconnect.v /home/student/Desktop/Honours-34/Honours_Project/rtl/interconnect/axi_interconnect_wrap_5x16.v /home/student/Desktop/Honours-34/Honours_Project/tb/tb_axi_interconnect_5x16.sv"}

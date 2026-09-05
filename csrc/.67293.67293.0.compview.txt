@@ -1,0 +1,6 @@
+Command exited with non-zero status 1
+{"vcs1":{"timestamp_begin":1788609991.681509534, "rt":0.05, "ut":0.01, "st":0.01}}
+{"SNPS_VCS_INTERNAL_ROOT_START_TIME": 1788609991.417938004}
+{"VCS_COMP_START_TIME": 1788609991.417938004}
+{"VCS_COMP_END_TIME": 1788609991.756128350}
+{"VCS_USER_OPTIONS": "-full64 -sverilog -timescale=1ns/1ps +define+FSDB -kdb -lca +vcs+lic+wait -debug_access+all -debug_region+cell+encrypt -P /home/student/snps_tools_target/verdi/U-2023.03-SP1/share/PLI/VCS/LINUX64/novas.tab -load /home/student/snps_tools_target/verdi/U-2023.03-SP1/share/PLI/VCS/LINUX64/pli.a -l /home/student/Desktop/Honours-34/Honours_Project/run/interconnect/compile.log -o /home/student/Desktop/Honours-34/Honours_Project/run/interconnect/simv /home/student/Desktop/Honours-34/Honours_Project/rtl/interconnect/priority_encoder.v /home/student/Desktop/Honours-34/Honours_Project/rtl/interconnect/arbiter.v /home/student/Desktop/Honours-34/Honours_Project/rtl/interconnect/axi_interconnect.v /home/student/Desktop/Honours-34/Honours_Project/rtl/interconnect/axi_interconnect_wrap_5x16.v /home/student/Desktop/Honours-34/Honours_Project/tb/tb_axi_interconnect_5x16.sv"}
