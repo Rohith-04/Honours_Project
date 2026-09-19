@@ -45,7 +45,10 @@ localparam LSR_THRE       = 5;
 localparam LSR_TEMT       = 6;
 
 localparam LCR_8N1       = 32'h0000_0003;
-localparam BAUD_DIV_SIM  = 32'd4;         // tiny divisor for fast sim
+// NOTE: do NOT use div=4. UART TX uses `counter >= div` (N+1 cycles/bit)
+// while RX uses `counter >= div-1` (N cycles/bit) — 25% mismatch at div=4
+// corrupts loopback (proven in tb_uart_wrap: 0x37->0xC9). div=100 is 1%.
+localparam BAUD_DIV_SIM  = 32'd100;
 localparam RESERVED_ADDR = 32'h2000_4000; // unmapped (no slave window)
 
 // ---------------------------------------------------------------------------
@@ -120,12 +123,20 @@ endtask
 // ---------------------------------------------------------------------------
 // TC5 helpers — drive SoC UART via forced m05 (xbar master port 5)
 // Only xbar-driven nets are forced; UART-driven nets are sampled.
+//
+// CAUTION (matches tb_uart_wrap fix): axi_uart_top gates
+//   bvalid_o = (awvalid & wvalid) ? bvalid : 0
+//   rvalid_o = (arvalid) ? rvalid : 0
+// so we must HOLD valids until bvalid/rvalid is sampled. Dropping
+// aw/wvalid on awready/wready deadlocks, and holding one extra cycle
+// after bvalid double-pushes THR. Deassert SAME cycle as sampling.
 // ---------------------------------------------------------------------------
 task uart_soc_write(
     input logic [31:0] addr,
     input logic [31:0] data,
     input logic [3:0]  strb = 4'hF
 );
+    int n;
     force dut.m05_awvalid = 1'b1;
     force dut.m05_awaddr  = addr;
     force dut.m05_awid    = 8'h00;
@@ -134,32 +145,23 @@ task uart_soc_write(
     force dut.m05_wstrb   = strb;
     force dut.m05_bready  = 1'b1;
 
-    // Wait for both address and data accepted
-    fork
-        begin : aw_hs
-            int n = 0;
-            while (dut.m05_awready !== 1'b1 && n < TIMEOUT_CYC) begin
-                @(posedge clk); n++;
-            end
-            force dut.m05_awvalid = 1'b0;
-        end
-        begin : w_hs
-            int n = 0;
-            while (dut.m05_wready !== 1'b1 && n < TIMEOUT_CYC) begin
-                @(posedge clk); n++;
-            end
-            force dut.m05_wvalid = 1'b0;
-        end
-    join
-
-    begin : b_hs
-        int n = 0;
-        while (dut.m05_bvalid !== 1'b1 && n < TIMEOUT_CYC) begin
-            @(posedge clk); n++;
-        end
-        @(posedge clk);
-        force dut.m05_bready = 1'b0;
+    // Hold AW/W until B response (bvalid implies ready already pulsed)
+    n = 0;
+    while (dut.m05_bvalid !== 1'b1 && n < TIMEOUT_CYC) begin
+        @(posedge clk); n++;
     end
+    if (dut.m05_bvalid !== 1'b1) begin
+        $error("[UART_SOC_WRITE] TIMEOUT addr=0x%0h", addr);
+        fail_count++;
+    end else if (dut.m05_bresp !== 2'b00) begin
+        $error("[UART_SOC_WRITE] FAIL addr=0x%0h bresp=0x%0h", addr, dut.m05_bresp);
+        fail_count++;
+    end
+
+    // Deassert same cycle (no extra @(posedge) before this or THR pushes twice)
+    force dut.m05_awvalid = 1'b0;
+    force dut.m05_wvalid  = 1'b0;
+    force dut.m05_bready  = 1'b0;
     @(posedge clk);
     release dut.m05_awvalid;
     release dut.m05_awaddr;
@@ -175,27 +177,31 @@ task uart_soc_read(
     input  logic [31:0] addr,
     output logic [31:0] data
 );
+    int n;
     force dut.m05_arvalid = 1'b1;
     force dut.m05_araddr  = addr;
     force dut.m05_arid    = 8'h00;
     force dut.m05_rready  = 1'b1;
 
-    begin : ar_hs
-        int n = 0;
-        while (dut.m05_arready !== 1'b1 && n < TIMEOUT_CYC) begin
-            @(posedge clk); n++;
-        end
-        force dut.m05_arvalid = 1'b0;
+    // Hold AR until R response
+    n = 0;
+    while (dut.m05_rvalid !== 1'b1 && n < TIMEOUT_CYC) begin
+        @(posedge clk); n++;
     end
-    begin : r_hs
-        int n = 0;
-        while (dut.m05_rvalid !== 1'b1 && n < TIMEOUT_CYC) begin
-            @(posedge clk); n++;
-        end
+    if (dut.m05_rvalid !== 1'b1) begin
+        $error("[UART_SOC_READ] TIMEOUT addr=0x%0h", addr);
+        fail_count++;
+        data = 32'hXXXX_XXXX;
+    end else begin
         data = dut.m05_rdata;
-        @(posedge clk);
-        force dut.m05_rready = 1'b0;
+        if (dut.m05_rresp !== 2'b00) begin
+            $error("[UART_SOC_READ] FAIL addr=0x%0h rresp=0x%0h", addr, dut.m05_rresp);
+            fail_count++;
+        end
     end
+
+    force dut.m05_arvalid = 1'b0;
+    force dut.m05_rready  = 1'b0;
     @(posedge clk);
     release dut.m05_arvalid;
     release dut.m05_araddr;
@@ -206,7 +212,8 @@ endtask
 
 task automatic uart_poll_lsr(input int bit_pos, input string name);
     logic [31:0] lsr;
-    int count = 0;
+    int count;
+    count = 0;
     do begin
         uart_soc_read(UART_BASE + 32'(ADDR_LSR), lsr);
         count++;
@@ -218,13 +225,30 @@ task automatic uart_poll_lsr(input int bit_pos, input string name);
     end while (lsr[bit_pos] !== 1'b1);
 endtask
 
+// Drain stale loopback bytes (TC5 sends 0xA5 then 0x37 with TX->RX always
+// wired, so the first byte must be discarded before checking the second).
+task automatic uart_drain_rx();
+    logic [31:0] lsr;
+    logic [31:0] dummy;
+    for (int i = 0; i < 40; i++) begin
+        uart_soc_read(UART_BASE + 32'(ADDR_LSR), lsr);
+        if (lsr[LSR_DATA_READY] !== 1'b1)
+            break;
+        uart_soc_read(UART_BASE + 32'(ADDR_RBR_THR), dummy);
+        $display("[DRAIN] discarded stale RX byte 0x%0h", dummy[7:0]);
+    end
+endtask
+
 // ---------------------------------------------------------------------------
 // TC6 helpers — inject via xbar s03 (tied-off NDA port) to unmapped space
+// (xbar is standard AXI: bvalid/rvalid held until ready, so ready-then-
+// response is safe here — unlike the UART IP gating).
 // ---------------------------------------------------------------------------
 task s03_read(
     input  logic [31:0] addr,
     output logic [1:0]  rresp
 );
+    int n;
     force dut.u_xbar.s03_axi_arvalid = 1'b1;
     force dut.u_xbar.s03_axi_araddr  = addr;
     force dut.u_xbar.s03_axi_arid    = 8'h00;
@@ -234,14 +258,14 @@ task s03_read(
     force dut.u_xbar.s03_axi_rready  = 1'b1;
 
     begin : ar_hs
-        int n = 0;
+        n = 0;
         while (dut.u_xbar.s03_axi_arready !== 1'b1 && n < TIMEOUT_CYC) begin
             @(posedge clk); n++;
         end
         force dut.u_xbar.s03_axi_arvalid = 1'b0;
     end
     begin : r_hs
-        int n = 0;
+        n = 0;
         while (dut.u_xbar.s03_axi_rvalid !== 1'b1 && n < TIMEOUT_CYC) begin
             @(posedge clk); n++;
         end
@@ -264,6 +288,7 @@ task s03_write(
     input  logic [31:0] addr,
     output logic [1:0]  bresp
 );
+    int n;
     force dut.u_xbar.s03_axi_awvalid = 1'b1;
     force dut.u_xbar.s03_axi_awaddr  = addr;
     force dut.u_xbar.s03_axi_awid    = 8'h00;
@@ -278,22 +303,24 @@ task s03_write(
 
     fork
         begin : aw_hs
-            int n = 0;
-            while (dut.u_xbar.s03_axi_awready !== 1'b1 && n < TIMEOUT_CYC) begin
-                @(posedge clk); n++;
+            int n_aw;
+            n_aw = 0;
+            while (dut.u_xbar.s03_axi_awready !== 1'b1 && n_aw < TIMEOUT_CYC) begin
+                @(posedge clk); n_aw++;
             end
             force dut.u_xbar.s03_axi_awvalid = 1'b0;
         end
         begin : w_hs
-            int n = 0;
-            while (dut.u_xbar.s03_axi_wready !== 1'b1 && n < TIMEOUT_CYC) begin
-                @(posedge clk); n++;
+            int n_w;
+            n_w = 0;
+            while (dut.u_xbar.s03_axi_wready !== 1'b1 && n_w < TIMEOUT_CYC) begin
+                @(posedge clk); n_w++;
             end
             force dut.u_xbar.s03_axi_wvalid = 1'b0;
         end
     join
     begin : b_hs
-        int n = 0;
+        n = 0;
         while (dut.u_xbar.s03_axi_bvalid !== 1'b1 && n < TIMEOUT_CYC) begin
             @(posedge clk); n++;
         end
@@ -348,7 +375,8 @@ initial begin
     // --------------------------------------------------------------
     $display("[TC2] Wait for VeeR AXI read request");
     begin : tc2
-        int n = 0;
+        int n;
+        n = 0;
         while (dut.ifu_arvalid !== 1'b1 && dut.lsu_arvalid !== 1'b1
                && n < TIMEOUT_CYC) begin
             @(posedge clk); n++;
@@ -362,7 +390,8 @@ initial begin
     // --------------------------------------------------------------
     $display("[TC3] Reset-vector fetch address");
     begin : tc3
-        int n = 0;
+        int n;
+        n = 0;
         // IFU may already be valid from TC2; sample current s01 address
         while (dut.u_xbar.s01_axi_arvalid !== 1'b1 && n < TIMEOUT_CYC) begin
             @(posedge clk); n++;
@@ -377,7 +406,8 @@ initial begin
     // --------------------------------------------------------------
     $display("[TC4] m00 stub handshake");
     begin : tc4
-        int n = 0;
+        int n;
+        n = 0;
         while (dut.m00_arvalid !== 1'b1 && n < TIMEOUT_CYC) begin
             @(posedge clk); n++;
         end
@@ -392,24 +422,35 @@ initial begin
 
     // --------------------------------------------------------------
     // TC5 — UART loopback through SoC hierarchy
+    // bresp is checked inside uart_soc_write while bvalid is high;
+    // checking dut.m05_bresp after return is stale (gated to 0 when idle).
     // --------------------------------------------------------------
     $display("[TC5] UART LCR + baud + loopback byte");
-    uart_soc_write(UART_BASE + 32'(ADDR_LCR), LCR_8N1);
-    check("UART LCR write bresp OKAY", dut.m05_bresp === 2'b00);
-    uart_soc_write(UART_BASE + 32'(ADDR_IER), 32'h0000_0001);
-    check("UART IER write bresp OKAY", dut.m05_bresp === 2'b00);
-    uart_soc_write(UART_BASE + 32'(ADDR_LCR), 32'h0000_0083); // DLAB=1
-    uart_soc_write(UART_BASE + 32'(ADDR_BAUD), BAUD_DIV_SIM);
-    uart_soc_write(UART_BASE + 32'(ADDR_LCR), LCR_8N1);       // DLAB=0
-    uart_soc_write(UART_BASE + 32'(ADDR_RBR_THR), 32'h0000_00A5);
-    uart_poll_lsr(LSR_TEMT, "TEMT");
-    check("UART TX byte completed (TEMT)", 1'b1);
-    uart_soc_write(UART_BASE + 32'(ADDR_RBR_THR), 32'h0000_0037);
-    uart_poll_lsr(LSR_DATA_READY, "DATA_READY");
-    begin : tc5_rb
-        logic [31:0] rbr;
-        uart_soc_read(UART_BASE + 32'(ADDR_RBR_THR), rbr);
-        check("UART loopback byte 0x37", rbr[7:0] === 8'h37);
+    begin : tc5
+        int fails_before;
+        fails_before = fail_count;
+        uart_soc_write(UART_BASE + 32'(ADDR_LCR), LCR_8N1);
+        uart_soc_write(UART_BASE + 32'(ADDR_IER), 32'h0000_0001);
+        uart_soc_write(UART_BASE + 32'(ADDR_LCR), 32'h0000_0083); // DLAB=1
+        uart_soc_write(UART_BASE + 32'(ADDR_BAUD), BAUD_DIV_SIM);
+        uart_soc_write(UART_BASE + 32'(ADDR_LCR), LCR_8N1);       // DLAB=0
+        check("UART config writes OKAY", fail_count == fails_before);
+        fails_before = fail_count;
+        uart_soc_write(UART_BASE + 32'(ADDR_RBR_THR), 32'h0000_00A5);
+        uart_poll_lsr(LSR_TEMT, "TEMT");
+        check("UART TX byte completed (TEMT)", fail_count == fails_before);
+        // Flush 0xA5 loopback before testing 0x37
+        $display("[TC5] Flushing 0xA5 loopback");
+        uart_poll_lsr(LSR_DATA_READY, "DATA_READY(flush)");
+        uart_drain_rx();
+        fails_before = fail_count;
+        uart_soc_write(UART_BASE + 32'(ADDR_RBR_THR), 32'h0000_0037);
+        uart_poll_lsr(LSR_DATA_READY, "DATA_READY");
+        begin : tc5_rb
+            logic [31:0] rbr;
+            uart_soc_read(UART_BASE + 32'(ADDR_RBR_THR), rbr);
+            check("UART loopback byte 0x37", rbr[7:0] === 8'h37);
+        end
     end
 
     // --------------------------------------------------------------

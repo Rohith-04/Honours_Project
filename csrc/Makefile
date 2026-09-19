@@ -8,7 +8,7 @@ VSRC=..
 TARGET_ARCH=
 
 # Choose name of executable 
-PRODUCTBASE=/home/student/Desktop/Honours-34/Honours_Project/run/top/simv
+PRODUCTBASE=/home/student/Desktop/Honours-34/Honours_Project/run/usw/simv
 
 PRODUCT=$(PRODUCTBASE)
 

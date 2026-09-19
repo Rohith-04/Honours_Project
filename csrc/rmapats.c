@@ -37,26 +37,6 @@ void  schedNewEvent (struct dummyq_struct * I1403, EBLK  * I1398, U  I624)
         sched_hsopt(pQ, I1398, I1667);
     }
 }
-void  rmaPropagate70_simv_daidir (UB  * pcode, scalar  val)
-{
-    UB  * I1737;
-    *(pcode + 0) = val;
-    pcode += 8;
-    UB  * I742 = *(UB  **)(pcode + 0);
-    if (I742 != (UB  *)(pcode + 0)) {
-        RmaSwitchGate  * I1764 = (RmaSwitchGate  *)I742;
-        RmaSwitchGate  * I956 = 0;
-        do {
-            RmaIbfPcode  * I1093 = (RmaIbfPcode  *)(((UB  *)I1764) + 24U);
-            ((FP )(I1093->I1093))((void *)I1093->pcode, val);
-            RmaDoublyLinkedListElem  I1765;
-            I1765.I956 = 0;
-            RmaSwitchGateInCbkListInfo  I1766;
-            I1766.I1250 = 0;
-            I956 = (RmaSwitchGate  *)I1764->I639.I1767.I956;
-        } while ((UB  *)(I1764 = I956) != (UB  *)I742);
-    }
-}
 #ifdef __cplusplus
 extern "C" {
 #endif

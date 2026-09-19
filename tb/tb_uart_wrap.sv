@@ -43,8 +43,12 @@ localparam LSR_TEMT       = 6;
 localparam LCR_8N1  = 32'h00000003;
 
 // Baud divisor for 115200 @ 100 MHz = 868
-// (set small for sim speed — override in TC4/TC5)
-localparam BAUD_DIV_SIM = 32'd4;       // tiny divisor for fast sim
+// NOTE: do NOT use a tiny divisor (e.g. 4). TX uses `counter >= div`
+// (N+1 cycles/bit) while RX uses `counter >= div-1` (N cycles/bit).
+// At div=4 that is a 25% baud mismatch and loopback corrupts data
+// (0x37 -> 0xC9 observed). At div=100 the mismatch is 1% — reliable
+// and still fast: ~10 bits * 101 cycles * 10ns ~= 10us/byte.
+localparam BAUD_DIV_SIM = 32'd100;
 
 // ---------------------------------------------------------------------------
 // Clock and reset
@@ -145,6 +149,13 @@ int fail_count = 0;
 
 // ---------------------------------------------------------------------------
 // AXI-Lite write task
+//
+// NOTE: axi_uart_top gates bvalid/rvalid with wren/rden
+//   bvalid_o = (awvalid & wvalid & ~sync) ? bvalid : 0
+//   rvalid_o = (arvalid & ~sync) ? rvalid : 0
+// so the master MUST hold AW/W (or AR) valid until the response is
+// sampled. Deasserting AW/W early drops bvalid before it can be seen
+// and deadlocks the testbench.
 // ---------------------------------------------------------------------------
 task automatic axi_write (
     input logic [31:0] addr,
@@ -162,28 +173,31 @@ task automatic axi_write (
     s_axi_wstrb   <= strb;
     s_axi_bready  <= 1'b1;
 
-    // Wait for both AW and W accepted
-    fork
-        begin
-            @(posedge clk iff s_axi_awready);
-            s_axi_awvalid <= 1'b0;
-        end
-        begin
-            @(posedge clk iff s_axi_wready);
-            s_axi_wvalid <= 1'b0;
-            s_axi_wdata  <= '0;
-            s_axi_wstrb  <= 4'hF;
-        end
-    join
-
-    // Wait for B response
+    // Hold AW/W valid until B response appears. Bvalid implies the
+    // slave has already pulsed AWREADY/WREADY for one cycle.
+    // IMPORTANT: deassert in the same cycle we sample bvalid (NBA).
+    // Waiting an extra cycle before deasserting lets the slave
+    // Idle->Ack again and double-pushes THR (every write executes twice).
     @(posedge clk iff s_axi_bvalid);
-    s_axi_bready <= 1'b0;
+    // Sample bresp while bvalid is high (after this, bresp drops to 0
+    // once wren is deasserted, so callers must not check s_axi_bresp
+    // after the task returns — check is done here).
+    if (s_axi_bresp !== 2'b00) begin
+        $error("[AXI_WRITE] FAIL: addr=0x%0h bresp=0x%0h", addr, s_axi_bresp);
+        fail_count++;
+    end
+
+    s_axi_awvalid <= 1'b0;
+    s_axi_wvalid  <= 1'b0;
+    s_axi_wdata   <= '0;
+    s_axi_wstrb   <= 4'hF;
+    s_axi_bready  <= 1'b0;
     @(posedge clk);
 endtask
 
 // ---------------------------------------------------------------------------
-// AXI-Lite read task
+// AXI-Lite read task — hold ARVALID until RVALID (same gating issue)
+// Deassert same cycle as sampling or every RBR read double-pulls.
 // ---------------------------------------------------------------------------
 task automatic axi_read (
     input  logic [31:0]              addr,
@@ -196,11 +210,14 @@ task automatic axi_read (
     s_axi_arid    <= id;
     s_axi_rready  <= 1'b1;
 
-    @(posedge clk iff s_axi_arready);
-    s_axi_arvalid <= 1'b0;
-
     @(posedge clk iff s_axi_rvalid);
-    data          = s_axi_rdata;
+    data = s_axi_rdata;
+    if (s_axi_rresp !== 2'b00) begin
+        $error("[AXI_READ] FAIL: addr=0x%0h rresp=0x%0h", addr, s_axi_rresp);
+        fail_count++;
+    end
+
+    s_axi_arvalid <= 1'b0;
     s_axi_rready  <= 1'b0;
     @(posedge clk);
 endtask
@@ -217,12 +234,30 @@ task automatic poll_lsr (
     do begin
         axi_read(32'h0000_0000 + ADDR_LSR, lsr);
         count++;
-        if (count > TIMEOUT_CYC) begin
+        if (count > 100000) begin
             $error("[TB] TIMEOUT waiting for LSR[%0d] (%s)", bit_pos, name);
             fail_count++;
             return;
         end
     end while (!lsr[bit_pos]);
+endtask
+
+// ---------------------------------------------------------------------------
+// Drain RX FIFO: discard any stale loopback bytes (e.g. TC4's 0xA5)
+// so TC5 reads back exactly the byte it just sent.
+// Call after RX has had time to complete (poll DATA_READY first if needed).
+// ---------------------------------------------------------------------------
+task automatic drain_rx();
+    logic [31:0] lsr;
+    logic [31:0] dummy;
+    // At most FIFO_DEPTH (32) entries + margin
+    for (int i = 0; i < 40; i++) begin
+        axi_read(32'h0000_0000 + ADDR_LSR, lsr);
+        if (!lsr[LSR_DATA_READY])
+            break;
+        axi_read(32'h0000_0000 + ADDR_RBR_THR, dummy);
+        $display("[DRAIN] discarded stale RX byte 0x%0h", dummy[7:0]);
+    end
 endtask
 
 // ---------------------------------------------------------------------------
@@ -273,28 +308,37 @@ initial begin
 
     // ------------------------------------------------------------------
     // TC2 — Write LCR: configure 8N1 (DLAB=0)
+    // bresp is checked inside axi_write (it must be sampled while
+    // bvalid is high), so here just detect whether the task logged
+    // a failure.
     // ------------------------------------------------------------------
     $display("[TC2] Write LCR = 8N1");
-    axi_write(32'h0000_0000 + ADDR_LCR, LCR_8N1);
-    if (s_axi_bresp !== 2'b00) begin
-        $error("[TC2] FAIL: bresp=0x%0h", s_axi_bresp);
-        fail_count++;
-    end else begin
-        $display("[TC2] PASS");
-        pass_count++;
+    begin
+        int fails_before;
+        fails_before = fail_count;
+        axi_write(32'h0000_0000 + ADDR_LCR, LCR_8N1);
+        if (fail_count != fails_before) begin
+            $error("[TC2] FAIL");
+        end else begin
+            $display("[TC2] PASS");
+            pass_count++;
+        end
     end
 
     // ------------------------------------------------------------------
     // TC3 — Write IER: enable RX interrupt
     // ------------------------------------------------------------------
     $display("[TC3] Enable RX interrupt via IER");
-    axi_write(32'h0000_0000 + ADDR_IER, 32'h0000_0001);
-    if (s_axi_bresp !== 2'b00) begin
-        $error("[TC3] FAIL: bresp=0x%0h", s_axi_bresp);
-        fail_count++;
-    end else begin
-        $display("[TC3] PASS");
-        pass_count++;
+    begin
+        int fails_before;
+        fails_before = fail_count;
+        axi_write(32'h0000_0000 + ADDR_IER, 32'h0000_0001);
+        if (fail_count != fails_before) begin
+            $error("[TC3] FAIL");
+        end else begin
+            $display("[TC3] PASS");
+            pass_count++;
+        end
     end
 
     // ------------------------------------------------------------------
@@ -302,17 +346,36 @@ initial begin
     //        then write THR and observe TX line activity
     // ------------------------------------------------------------------
     $display("[TC4] Set baud divisor and transmit byte 0xA5");
-    // Set DLAB=1 to access baud register
-    axi_write(32'h0000_0000 + ADDR_LCR, 32'h0000_0083);  // 8N1 + DLAB=1
-    axi_write(32'h0000_0000 + ADDR_BAUD, BAUD_DIV_SIM);
-    // Clear DLAB
-    axi_write(32'h0000_0000 + ADDR_LCR, LCR_8N1);
-    // Write byte to THR
-    axi_write(32'h0000_0000 + ADDR_RBR_THR, 32'h0000_00A5);
-    // Poll TEMT (transmitter empty) — gives time for TX to complete
-    poll_lsr(LSR_TEMT, "TEMT");
-    $display("[TC4] PASS — TX completed");
-    pass_count++;
+    begin
+        int fails_before;
+        fails_before = fail_count;
+        // Set DLAB=1 to access baud register
+        axi_write(32'h0000_0000 + ADDR_LCR, 32'h0000_0083);  // 8N1 + DLAB=1
+        axi_write(32'h0000_0000 + ADDR_BAUD, BAUD_DIV_SIM);
+        // Clear DLAB
+        axi_write(32'h0000_0000 + ADDR_LCR, LCR_8N1);
+        // Write byte to THR
+        axi_write(32'h0000_0000 + ADDR_RBR_THR, 32'h0000_00A5);
+        // Poll TEMT (transmitter empty) — gives time for TX to complete
+        poll_lsr(LSR_TEMT, "TEMT");
+        if (fail_count != fails_before) begin
+            $error("[TC4] FAIL");
+        end else begin
+            $display("[TC4] PASS — TX completed");
+            pass_count++;
+        end
+    end
+
+    // ------------------------------------------------------------------
+    // Flush TC4 loopback byte: uart_rx=uart_tx is always wired, so TC4's
+    // 0xA5 is sitting in the RX FIFO. Drain it so TC5 reads back only
+    // the byte it sends.
+    // ------------------------------------------------------------------
+    begin
+        $display("[FLUSH] Waiting for TC4 loopback RX, then draining");
+        poll_lsr(LSR_DATA_READY, "DATA_READY(flush)");
+        drain_rx();
+    end
 
     // ------------------------------------------------------------------
     // TC5 — Loopback: TX→RX, check DATA_READY and read back byte
@@ -337,10 +400,18 @@ initial begin
     // TC6 — Read LSR: THRE and TEMT should be set when TX idle
     // ------------------------------------------------------------------
     $display("[TC6] Read LSR — THRE/TEMT should be set");
-    poll_lsr(LSR_THRE, "THRE");
-    poll_lsr(LSR_TEMT, "TEMT");
-    $display("[TC6] PASS");
-    pass_count++;
+    begin
+        int fails_before;
+        fails_before = fail_count;
+        poll_lsr(LSR_THRE, "THRE");
+        poll_lsr(LSR_TEMT, "TEMT");
+        if (fail_count != fails_before) begin
+            $error("[TC6] FAIL");
+        end else begin
+            $display("[TC6] PASS");
+            pass_count++;
+        end
+    end
 
     // ------------------------------------------------------------------
     // Summary

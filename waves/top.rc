@@ -47,7 +47,7 @@ addSignal -h 15 -holdScope /tb_honours_soc/dut/ifu_arready
 addSignal -h 15 -holdScope /tb_honours_soc/dut/lsu_arvalid
 addSignal -h 15 -UNSIGNED -HEX -holdScope /tb_honours_soc/dut/lsu_araddr[31:0]
 addSignal -h 15 -holdScope /tb_honours_soc/dut/ifu_rvalid
-addSignal -h 15 -UNSIGNED -HEX -holdScope /tb_honours_soc/dut/xbar_s01_rdata[31:0]
+addSignal -h 15 -UNSIGNED -HEX -holdScope /tb_honours_soc/dut/ifu_rdata[63:0]
 
 ; ============================================================
 ; Group 3: m00 DRAM stub (xbar -> mem)

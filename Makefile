@@ -102,7 +102,8 @@ top_FILES    := \
     $(PROJ_ROOT)/ips/uart/src/rtl/axi_internal_fifo.v \
     $(PROJ_ROOT)/ips/uart/src/rtl/axi_uart_top.v \
     $(PROJ_ROOT)/rtl/uart/uart_wrap.sv \
-    $(PROJ_ROOT)/rtl/soc/axi_stub_mem.sv \
+    $(PROJ_ROOT)/rtl/soc/axi64_to_32_bridge.sv \
+    $(PROJ_ROOT)/rtl/soc/axi_true_mem.sv \
     $(PROJ_ROOT)/rtl/soc/honours_soc.sv \
     $(PROJ_ROOT)/tb/tb_honours_soc.sv
 top_INCDIRS  := \
@@ -110,8 +111,64 @@ top_INCDIRS  := \
     +incdir+$(RV_ROOT)/design/include \
     +incdir+$(RV_ROOT)/design/lib \
     +incdir+$(RV_ROOT)/testbench \
-    +incdir+$(PROJ_ROOT)/ips/uart/src/include
+    +incdir+$(PROJ_ROOT)/ips/uart/src/include \
+    +incdir+$(PROJ_ROOT)/tb
 top_RC       := $(PROJ_ROOT)/waves/top.rc
+
+# --- mid (SoC middle layer: SB-routed UART via s03, same RTL as top) ---
+mid_GEN      := $(top_GEN)
+mid_TOP      := tb_core_uart
+mid_FILES    := \
+    $(top_GEN)/common_defines.vh \
+    $(RV_ROOT)/design/include/el2_def.sv \
+    $(RV_ROOT)/design/el2_lockstep_pkg.sv \
+    -f $(RV_ROOT)/design/flist \
+    $(PROJ_ROOT)/rtl/interconnect/priority_encoder.v \
+    $(PROJ_ROOT)/rtl/interconnect/arbiter.v \
+    $(PROJ_ROOT)/rtl/interconnect/axi_interconnect.v \
+    $(PROJ_ROOT)/rtl/interconnect/axi_interconnect_wrap_5x16.v \
+    $(PROJ_ROOT)/ips/uart/src/rtl/uart_parity_bit_compute.v \
+    $(PROJ_ROOT)/ips/uart/src/rtl/uart_receiver.v \
+    $(PROJ_ROOT)/ips/uart/src/rtl/uart_transmitter.v \
+    $(PROJ_ROOT)/ips/uart/src/rtl/uart_controller.v \
+    $(PROJ_ROOT)/ips/uart/src/rtl/axi_internal_fifo.v \
+    $(PROJ_ROOT)/ips/uart/src/rtl/axi_uart_top.v \
+    $(PROJ_ROOT)/rtl/uart/uart_wrap.sv \
+    $(PROJ_ROOT)/rtl/soc/axi64_to_32_bridge.sv \
+    $(PROJ_ROOT)/rtl/soc/axi_true_mem.sv \
+    $(PROJ_ROOT)/rtl/soc/honours_soc.sv \
+    $(PROJ_ROOT)/tb/tb_core_uart.sv
+mid_INCDIRS  := $(top_INCDIRS)
+mid_RC       := $(PROJ_ROOT)/waves/mid.rc
+
+# --- usw (single SW test: core executes, byte on uart_tx, no tasks/forces) ---
+usw_GEN      := $(top_GEN)
+usw_TOP      := tb_uart_sw_simple
+usw_FILES    := \
+    $(top_GEN)/common_defines.vh \
+    $(RV_ROOT)/design/include/el2_def.sv \
+    $(RV_ROOT)/design/el2_lockstep_pkg.sv \
+    -f $(RV_ROOT)/design/flist \
+    $(PROJ_ROOT)/rtl/interconnect/priority_encoder.v \
+    $(PROJ_ROOT)/rtl/interconnect/arbiter.v \
+    $(PROJ_ROOT)/rtl/interconnect/axi_interconnect.v \
+    $(PROJ_ROOT)/rtl/interconnect/axi_interconnect_wrap_5x16.v \
+    $(PROJ_ROOT)/ips/uart/src/rtl/uart_parity_bit_compute.v \
+    $(PROJ_ROOT)/ips/uart/src/rtl/uart_receiver.v \
+    $(PROJ_ROOT)/ips/uart/src/rtl/uart_transmitter.v \
+    $(PROJ_ROOT)/ips/uart/src/rtl/uart_controller.v \
+    $(PROJ_ROOT)/ips/uart/src/rtl/axi_internal_fifo.v \
+    $(PROJ_ROOT)/ips/uart/src/rtl/axi_uart_top.v \
+    $(PROJ_ROOT)/rtl/uart/uart_wrap.sv \
+    $(PROJ_ROOT)/rtl/soc/axi64_to_32_bridge.sv \
+    $(PROJ_ROOT)/rtl/soc/axi_true_mem.sv \
+    $(PROJ_ROOT)/rtl/soc/honours_soc.sv \
+    $(PROJ_ROOT)/tb/tb_uart_sw_simple.sv
+usw_INCDIRS  := $(top_INCDIRS)
+usw_RC       := $(PROJ_ROOT)/waves/usw.rc
+
+# UART SW image (built by sw/uart_test/Makefile)
+UART_SW_HEX  := $(PROJ_ROOT)/sw/uart_test/build/uart_test.hex
 
 # VeeR config headers (el2_param.vh / el2_pdef.vh / common_defines.vh) are
 # generated on demand into run/top/veer_gen (git-ignored, survives .clean
@@ -126,8 +183,8 @@ top-gen:
 	    echo "[make] VeeR headers up to date: $(top_GEN)"; \
 	fi
 
-# top needs generated headers before compile+sim
-top.sim top.verdi: top-gen
+# top/mid/usw need generated headers before compile+sim
+top.sim top.verdi mid.sim mid.verdi usw.sim usw.verdi: top-gen
 
 # ---------------------------------------------------------------------------
 # Pattern rules:  make <module>.sim | <module>.verdi | <module>.clean
@@ -210,6 +267,61 @@ clean:
 	@echo "[make] Done."
 
 # ---------------------------------------------------------------------------
+# Single-command SW test: `make usw` — builds C image, runs simple TB.
+# TB = tb_uart_sw_simple (core executes, byte on uart_tx, no tasks/forces).
+# ---------------------------------------------------------------------------
+.PHONY: usw
+usw: top-gen
+	@echo "[make] Building uart_test image..."
+	@$(MAKE) -C $(PROJ_ROOT)/sw/uart_test
+	@if [ ! -f "$(UART_SW_HEX)" ]; then echo "ERROR: $(UART_SW_HEX) not built"; exit 1; fi
+	@mkdir -p $(PROJ_ROOT)/run/usw
+	@echo "[make] Compiling usw (top: $(usw_TOP))..."
+	$(VCS) $(VCS_FLAGS) \
+	    $(usw_INCDIRS) \
+	    -l $(PROJ_ROOT)/run/usw/compile.log \
+	    -o $(PROJ_ROOT)/run/usw/simv \
+	    $(usw_FILES)
+	@echo "[make] Compile done. Log: $(PROJ_ROOT)/run/usw/compile.log"
+	@echo "[make] Simulating usw (SW_HEX=$(UART_SW_HEX))..."
+	cd $(PROJ_ROOT)/run/usw && $(PROJ_ROOT)/run/usw/simv \
+	    +vcs+fsdbon \
+	    +vcs+lic+wait \
+	    +SW_HEX=$(UART_SW_HEX) \
+	    -l $(PROJ_ROOT)/run/usw/sim.log
+	@echo "[make] Simulation done. Log: $(PROJ_ROOT)/run/usw/sim.log FSDB: $(PROJ_ROOT)/run/usw/$(usw_TOP).fsdb"
+
+# ---------------------------------------------------------------------------
+# UART SW test: `make uart.sw` — build C image, run core-driven UART on SoC
+# Uses the mid simv (tb_core_uart + true RAM) with +SW_HEX=<image>.
+# ---------------------------------------------------------------------------
+.PHONY: uart.sw uart.sw.clean
+uart.sw: top-gen
+	@echo "[make] Building uart_test image..."
+	@$(MAKE) -C $(PROJ_ROOT)/sw/uart_test
+	@if [ ! -f "$(UART_SW_HEX)" ]; then echo "ERROR: $(UART_SW_HEX) not built"; exit 1; fi
+	@mkdir -p $(PROJ_ROOT)/run/mid
+	@echo "[make] Compiling mid (top: $(mid_TOP))..."
+	$(VCS) $(VCS_FLAGS) \
+	    $(mid_INCDIRS) \
+	    -l $(PROJ_ROOT)/run/mid/compile.log \
+	    -o $(PROJ_ROOT)/run/mid/simv \
+	    $(mid_FILES)
+	@echo "[make] Compile done. Log: $(PROJ_ROOT)/run/mid/compile.log"
+	@echo "[make] Simulating uart.sw (SW_HEX=$(UART_SW_HEX))..."
+	cd $(PROJ_ROOT)/run/mid && $(PROJ_ROOT)/run/mid/simv \
+	    +vcs+fsdbon \
+	    +vcs+lic+wait \
+	    +SW_HEX=$(UART_SW_HEX) \
+	    -l $(PROJ_ROOT)/run/mid/sw.log
+	@echo "[make] Simulation done. Log: $(PROJ_ROOT)/run/mid/sw.log FSDB: $(PROJ_ROOT)/run/mid/$(mid_TOP).fsdb"
+
+uart.sw.clean:
+	@echo "[make] Cleaning sw/uart_test/build/..."
+	rm -rf $(PROJ_ROOT)/sw/uart_test/build
+	@echo "[make] Done."
+
+# ---------------------------------------------------------------------------
 # Help
 # ---------------------------------------------------------------------------
 .PHONY: help
@@ -219,17 +331,23 @@ help:
 	@echo "  make <module>.sim       Compile + simulate"
 	@echo "  make <module>.verdi     Compile + simulate + open Verdi"
 	@echo "  make <module>.clean     Remove run/<module>/ only"
+	@echo "  make uart.sw            Build uart_test C image + core-driven SoC run"
+	@echo "  make uart.sw.clean      Remove sw/uart_test/build/ only"
 	@echo "  make clean              Remove entire run/ directory"
 	@echo ""
 	@echo "Available modules:"
 	@echo "  interconnect            tb_axi_interconnect_5x16  (waves/axi_interconnect_5x16.rc)"
 	@echo "  uart                    tb_uart_wrap              (waves/uart.rc)"
 	@echo "  top                     tb_honours_soc            (waves/top.rc)"
+	@echo "  mid                     tb_core_uart              (waves/mid.rc)"
+	@echo "  usw                     tb_uart_sw_simple         (waves/usw.rc)"
 	@echo "  nda                     (not yet — add tb and waves/*.rc first)"
 	@echo ""
 	@echo "Examples:"
 	@echo "  make interconnect.sim"
 	@echo "  make interconnect.verdi"
 	@echo "  make interconnect.clean"
+	@echo "  make mid.sim            SB-routed middle layer (no SW image)"
+	@echo "  make uart.sw            SW-driven UART (VeeR executes C image)"
 	@echo "  make clean"
 	@echo ""

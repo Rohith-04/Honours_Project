@@ -55,7 +55,43 @@ import el2_pkg::*;
     output logic        jtag_tdo_en,
 
     // External interrupt bus to VeeR PIC (tie off unused sources)
-    input  logic [pt.PIC_TOTAL_INT:1] extintsrc_req
+    input  logic [pt.PIC_TOTAL_INT:1] extintsrc_req,
+
+    // ------------------------------------------------------------------
+    // s03 test hooks (NDA seat): let the TB drive the tied-off NDA master
+    // port as a proper AXI master. Defaults keep old TBs compiling and the
+    // port idle; tb_core_uart drives these procedurally (NO force).
+    // When NDA RTL lands, these hooks are replaced by the engine.
+    // ------------------------------------------------------------------
+    input  logic [7:0]  tb_s03_awid    = '0,
+    input  logic [31:0] tb_s03_awaddr  = '0,
+    input  logic [7:0]  tb_s03_awlen   = '0,
+    input  logic [2:0]  tb_s03_awsize  = 3'b010,
+    input  logic [1:0]  tb_s03_awburst = 2'b01,
+    input  logic        tb_s03_awvalid = 1'b0,
+    output logic        tb_s03_awready,
+    input  logic [31:0] tb_s03_wdata   = '0,
+    input  logic [3:0]  tb_s03_wstrb   = 4'hF,
+    input  logic        tb_s03_wlast   = 1'b1,
+    input  logic        tb_s03_wvalid  = 1'b0,
+    output logic        tb_s03_wready,
+    output logic [7:0]  tb_s03_bid,
+    output logic [1:0]  tb_s03_bresp,
+    output logic        tb_s03_bvalid,
+    input  logic        tb_s03_bready  = 1'b1,
+    input  logic [7:0]  tb_s03_arid    = '0,
+    input  logic [31:0] tb_s03_araddr  = '0,
+    input  logic [7:0]  tb_s03_arlen   = '0,
+    input  logic [2:0]  tb_s03_arsize  = 3'b010,
+    input  logic [1:0]  tb_s03_arburst = 2'b01,
+    input  logic        tb_s03_arvalid = 1'b0,
+    output logic        tb_s03_arready,
+    output logic [7:0]  tb_s03_rid,
+    output logic [31:0] tb_s03_rdata,
+    output logic [1:0]  tb_s03_rresp,
+    output logic        tb_s03_rlast,
+    output logic        tb_s03_rvalid,
+    input  logic        tb_s03_rready  = 1'b1
 );
 
     // =========================================================================
@@ -189,40 +225,187 @@ import el2_pkg::*;
     logic                         sb_rlast;
 
     // =========================================================================
-    // Interconnect slave-side buses (32-bit, XBAR_ID_W-bit ID)
+    // 64-to-32 AXI width bridges (VeeR 64-bit -> 32-bit xbar)
+    // One per CPU master; s03/s04 (NDA) are already 32-bit. See
+    // axi64_to_32_bridge.sv for the conversion rule.
     // =========================================================================
+    // Bridge <-> xbar (32-bit) wires
+    logic [XBAR_ID_W-1:0] br_s00_awid, br_s00_arid, br_s00_bid, br_s00_rid;
+    logic [31:0]  br_s00_awaddr, br_s00_araddr, br_s00_wdata, br_s00_rdata;
+    logic [7:0]   br_s00_awlen, br_s00_arlen;
+    logic [2:0]   br_s00_awsize, br_s00_arsize;
+    logic [1:0]   br_s00_awburst, br_s00_arburst;
+    logic         br_s00_awlock, br_s00_arlock;
+    logic [3:0]   br_s00_awcache, br_s00_arcache;
+    logic [2:0]   br_s00_awprot, br_s00_arprot;
+    logic [3:0]   br_s00_awqos, br_s00_arqos;
+    logic         br_s00_awvalid, br_s00_awready;
+    logic [3:0]   br_s00_wstrb;
+    logic         br_s00_wlast, br_s00_wvalid, br_s00_wready;
+    logic [1:0]   br_s00_bresp, br_s00_rresp;
+    logic         br_s00_bvalid, br_s00_bready;
+    logic         br_s00_arvalid, br_s00_arready;
+    logic         br_s00_rlast, br_s00_rvalid, br_s00_rready;
 
-    // s00 — LSU mapped to interconnect (data truncated to 32-bit)
-    logic [XBAR_ID_W-1:0]  s00_awid;
-    logic [XBAR_ID_W-1:0]  s00_arid;
-    assign s00_awid         = {{(XBAR_ID_W-pt.LSU_BUS_TAG){1'b0}}, lsu_awid};
-    assign s00_arid         = {{(XBAR_ID_W-pt.LSU_BUS_TAG){1'b0}}, lsu_arid};
-    // TODO: proper width adapter. For now lower half of wdata, ignore upper rdata.
+    logic [XBAR_ID_W-1:0] br_s01_awid, br_s01_arid, br_s01_bid, br_s01_rid;
+    logic [31:0]  br_s01_awaddr, br_s01_araddr, br_s01_wdata, br_s01_rdata;
+    logic [7:0]   br_s01_awlen, br_s01_arlen;
+    logic [2:0]   br_s01_awsize, br_s01_arsize;
+    logic [1:0]   br_s01_awburst, br_s01_arburst;
+    logic         br_s01_awlock, br_s01_arlock;
+    logic [3:0]   br_s01_awcache, br_s01_arcache;
+    logic [2:0]   br_s01_awprot, br_s01_arprot;
+    logic [3:0]   br_s01_awqos, br_s01_arqos;
+    logic         br_s01_awvalid, br_s01_awready;
+    logic [3:0]   br_s01_wstrb;
+    logic         br_s01_wlast, br_s01_wvalid, br_s01_wready;
+    logic [1:0]   br_s01_bresp, br_s01_rresp;
+    logic         br_s01_bvalid, br_s01_bready;
+    logic         br_s01_arvalid, br_s01_arready;
+    logic         br_s01_rlast, br_s01_rvalid, br_s01_rready;
 
-    // s01 — IFU
-    logic [XBAR_ID_W-1:0]  s01_awid;
-    logic [XBAR_ID_W-1:0]  s01_arid;
-    assign s01_awid         = {{(XBAR_ID_W-pt.IFU_BUS_TAG){1'b0}}, ifu_awid};
-    assign s01_arid         = {{(XBAR_ID_W-pt.IFU_BUS_TAG){1'b0}}, ifu_arid};
+    logic [XBAR_ID_W-1:0] br_s02_awid, br_s02_arid, br_s02_bid, br_s02_rid;
+    logic [31:0]  br_s02_awaddr, br_s02_araddr, br_s02_wdata, br_s02_rdata;
+    logic [7:0]   br_s02_awlen, br_s02_arlen;
+    logic [2:0]   br_s02_awsize, br_s02_arsize;
+    logic [1:0]   br_s02_awburst, br_s02_arburst;
+    logic         br_s02_awlock, br_s02_arlock;
+    logic [3:0]   br_s02_awcache, br_s02_arcache;
+    logic [2:0]   br_s02_awprot, br_s02_arprot;
+    logic [3:0]   br_s02_awqos, br_s02_arqos;
+    logic         br_s02_awvalid, br_s02_awready;
+    logic [3:0]   br_s02_wstrb;
+    logic         br_s02_wlast, br_s02_wvalid, br_s02_wready;
+    logic [1:0]   br_s02_bresp, br_s02_rresp;
+    logic         br_s02_bvalid, br_s02_bready;
+    logic         br_s02_arvalid, br_s02_arready;
+    logic         br_s02_rlast, br_s02_rvalid, br_s02_rready;
 
-    // s02 — SB
-    logic [XBAR_ID_W-1:0]  s02_awid;
-    logic [XBAR_ID_W-1:0]  s02_arid;
-    assign s02_awid         = {{(XBAR_ID_W-pt.SB_BUS_TAG){1'b0}}, sb_awid};
-    assign s02_arid         = {{(XBAR_ID_W-pt.SB_BUS_TAG){1'b0}}, sb_arid};
+    axi64_to_32_bridge #(.S_ID_W(pt.LSU_BUS_TAG), .M_ID_W(XBAR_ID_W)) u_br_s00 (
+        .clk(clk), .rst_n(rst_n),
+        .s_awid(lsu_awid),         .s_awaddr(lsu_awaddr),
+        .s_awlen(lsu_awlen),       .s_awsize(lsu_awsize),
+        .s_awburst(lsu_awburst),   .s_awlock(lsu_awlock),
+        .s_awcache(lsu_awcache),   .s_awprot(lsu_awprot),
+        .s_awqos(lsu_awqos),       .s_awvalid(lsu_awvalid),
+        .s_awready(lsu_awready),   .s_wdata(lsu_wdata),
+        .s_wstrb(lsu_wstrb),       .s_wlast(lsu_wlast),
+        .s_wvalid(lsu_wvalid),     .s_wready(lsu_wready),
+        .s_bid(lsu_bid),           .s_bresp(lsu_bresp),
+        .s_bvalid(lsu_bvalid),     .s_bready(lsu_bready),
+        .s_arid(lsu_arid),         .s_araddr(lsu_araddr),
+        .s_arlen(lsu_arlen),       .s_arsize(lsu_arsize),
+        .s_arburst(lsu_arburst),   .s_arlock(lsu_arlock),
+        .s_arcache(lsu_arcache),   .s_arprot(lsu_arprot),
+        .s_arqos(lsu_arqos),       .s_arvalid(lsu_arvalid),
+        .s_arready(lsu_arready),   .s_rid(lsu_rid),
+        .s_rdata(lsu_rdata),       .s_rresp(lsu_rresp),
+        .s_rlast(lsu_rlast),       .s_rvalid(lsu_rvalid),
+        .s_rready(lsu_rready),
+        .m_awid(br_s00_awid),      .m_awaddr(br_s00_awaddr),
+        .m_awlen(br_s00_awlen),    .m_awsize(br_s00_awsize),
+        .m_awburst(br_s00_awburst),.m_awlock(br_s00_awlock),
+        .m_awcache(br_s00_awcache),.m_awprot(br_s00_awprot),
+        .m_awqos(br_s00_awqos),    .m_awvalid(br_s00_awvalid),
+        .m_awready(br_s00_awready),.m_wdata(br_s00_wdata),
+        .m_wstrb(br_s00_wstrb),    .m_wlast(br_s00_wlast),
+        .m_wvalid(br_s00_wvalid),  .m_wready(br_s00_wready),
+        .m_bid(br_s00_bid),        .m_bresp(br_s00_bresp),
+        .m_bvalid(br_s00_bvalid),  .m_bready(br_s00_bready),
+        .m_arid(br_s00_arid),      .m_araddr(br_s00_araddr),
+        .m_arlen(br_s00_arlen),    .m_arsize(br_s00_arsize),
+        .m_arburst(br_s00_arburst),.m_arlock(br_s00_arlock),
+        .m_arcache(br_s00_arcache),.m_arprot(br_s00_arprot),
+        .m_arqos(br_s00_arqos),    .m_arvalid(br_s00_arvalid),
+        .m_arready(br_s00_arready),.m_rid(br_s00_rid),
+        .m_rdata(br_s00_rdata),    .m_rresp(br_s00_rresp),
+        .m_rlast(br_s00_rlast),    .m_rvalid(br_s00_rvalid),
+        .m_rready(br_s00_rready)
+    );
 
-    // ID width adaptation (xbar returns XBAR_ID_W bits; VeeR wants narrower)
-    // Declared here (before u_xbar) — default_nettype none forbids use-before-declare.
-    logic [XBAR_ID_W-1:0] s00_bid_w, s00_rid_w;
-    logic [XBAR_ID_W-1:0] s01_bid_w, s01_rid_w;
-    logic [XBAR_ID_W-1:0] s02_bid_w, s02_rid_w;
+    axi64_to_32_bridge #(.S_ID_W(pt.IFU_BUS_TAG), .M_ID_W(XBAR_ID_W)) u_br_s01 (
+        .clk(clk), .rst_n(rst_n),
+        .s_awid(ifu_awid),         .s_awaddr(ifu_awaddr),
+        .s_awlen(ifu_awlen),       .s_awsize(ifu_awsize),
+        .s_awburst(ifu_awburst),   .s_awlock(ifu_awlock),
+        .s_awcache(ifu_awcache),   .s_awprot(ifu_awprot),
+        .s_awqos(ifu_awqos),       .s_awvalid(ifu_awvalid),
+        .s_awready(ifu_awready),   .s_wdata(ifu_wdata),
+        .s_wstrb(ifu_wstrb),       .s_wlast(ifu_wlast),
+        .s_wvalid(ifu_wvalid),     .s_wready(ifu_wready),
+        .s_bid(ifu_bid),           .s_bresp(ifu_bresp),
+        .s_bvalid(ifu_bvalid),     .s_bready(ifu_bready),
+        .s_arid(ifu_arid),         .s_araddr(ifu_araddr),
+        .s_arlen(ifu_arlen),       .s_arsize(ifu_arsize),
+        .s_arburst(ifu_arburst),   .s_arlock(ifu_arlock),
+        .s_arcache(ifu_arcache),   .s_arprot(ifu_arprot),
+        .s_arqos(ifu_arqos),       .s_arvalid(ifu_arvalid),
+        .s_arready(ifu_arready),   .s_rid(ifu_rid),
+        .s_rdata(ifu_rdata),       .s_rresp(ifu_rresp),
+        .s_rlast(ifu_rlast),       .s_rvalid(ifu_rvalid),
+        .s_rready(ifu_rready),
+        .m_awid(br_s01_awid),      .m_awaddr(br_s01_awaddr),
+        .m_awlen(br_s01_awlen),    .m_awsize(br_s01_awsize),
+        .m_awburst(br_s01_awburst),.m_awlock(br_s01_awlock),
+        .m_awcache(br_s01_awcache),.m_awprot(br_s01_awprot),
+        .m_awqos(br_s01_awqos),    .m_awvalid(br_s01_awvalid),
+        .m_awready(br_s01_awready),.m_wdata(br_s01_wdata),
+        .m_wstrb(br_s01_wstrb),    .m_wlast(br_s01_wlast),
+        .m_wvalid(br_s01_wvalid),  .m_wready(br_s01_wready),
+        .m_bid(br_s01_bid),        .m_bresp(br_s01_bresp),
+        .m_bvalid(br_s01_bvalid),  .m_bready(br_s01_bready),
+        .m_arid(br_s01_arid),      .m_araddr(br_s01_araddr),
+        .m_arlen(br_s01_arlen),    .m_arsize(br_s01_arsize),
+        .m_arburst(br_s01_arburst),.m_arlock(br_s01_arlock),
+        .m_arcache(br_s01_arcache),.m_arprot(br_s01_arprot),
+        .m_arqos(br_s01_arqos),    .m_arvalid(br_s01_arvalid),
+        .m_arready(br_s01_arready),.m_rid(br_s01_rid),
+        .m_rdata(br_s01_rdata),    .m_rresp(br_s01_rresp),
+        .m_rlast(br_s01_rlast),    .m_rvalid(br_s01_rvalid),
+        .m_rready(br_s01_rready)
+    );
 
-    // Read data widening (32→64): replicate lower 32 bits into upper half
-    // (xbar_s0x_rdata declared here before use — default_nettype none)
-    logic [31:0]  xbar_s00_rdata, xbar_s01_rdata, xbar_s02_rdata;
-    assign lsu_rdata        = {32'b0, xbar_s00_rdata};
-    assign ifu_rdata        = {32'b0, xbar_s01_rdata};
-    assign sb_rdata         = {32'b0, xbar_s02_rdata};
+    axi64_to_32_bridge #(.S_ID_W(pt.SB_BUS_TAG), .M_ID_W(XBAR_ID_W)) u_br_s02 (
+        .clk(clk), .rst_n(rst_n),
+        .s_awid(sb_awid),          .s_awaddr(sb_awaddr),
+        .s_awlen(sb_awlen),        .s_awsize(sb_awsize),
+        .s_awburst(sb_awburst),    .s_awlock(sb_awlock),
+        .s_awcache(sb_awcache),    .s_awprot(sb_awprot),
+        .s_awqos(sb_awqos),        .s_awvalid(sb_awvalid),
+        .s_awready(sb_awready),    .s_wdata(sb_wdata),
+        .s_wstrb(sb_wstrb),        .s_wlast(sb_wlast),
+        .s_wvalid(sb_wvalid),      .s_wready(sb_wready),
+        .s_bid(sb_bid),            .s_bresp(sb_bresp),
+        .s_bvalid(sb_bvalid),      .s_bready(sb_bready),
+        .s_arid(sb_arid),          .s_araddr(sb_araddr),
+        .s_arlen(sb_arlen),        .s_arsize(sb_arsize),
+        .s_arburst(sb_arburst),    .s_arlock(sb_arlock),
+        .s_arcache(sb_arcache),    .s_arprot(sb_arprot),
+        .s_arqos(sb_arqos),        .s_arvalid(sb_arvalid),
+        .s_arready(sb_arready),    .s_rid(sb_rid),
+        .s_rdata(sb_rdata),        .s_rresp(sb_rresp),
+        .s_rlast(sb_rlast),        .s_rvalid(sb_rvalid),
+        .s_rready(sb_rready),
+        .m_awid(br_s02_awid),      .m_awaddr(br_s02_awaddr),
+        .m_awlen(br_s02_awlen),    .m_awsize(br_s02_awsize),
+        .m_awburst(br_s02_awburst),.m_awlock(br_s02_awlock),
+        .m_awcache(br_s02_awcache),.m_awprot(br_s02_awprot),
+        .m_awqos(br_s02_awqos),    .m_awvalid(br_s02_awvalid),
+        .m_awready(br_s02_awready),.m_wdata(br_s02_wdata),
+        .m_wstrb(br_s02_wstrb),    .m_wlast(br_s02_wlast),
+        .m_wvalid(br_s02_wvalid),  .m_wready(br_s02_wready),
+        .m_bid(br_s02_bid),        .m_bresp(br_s02_bresp),
+        .m_bvalid(br_s02_bvalid),  .m_bready(br_s02_bready),
+        .m_arid(br_s02_arid),      .m_araddr(br_s02_araddr),
+        .m_arlen(br_s02_arlen),    .m_arsize(br_s02_arsize),
+        .m_arburst(br_s02_arburst),.m_arlock(br_s02_arlock),
+        .m_arcache(br_s02_arcache),.m_arprot(br_s02_arprot),
+        .m_arqos(br_s02_arqos),    .m_arvalid(br_s02_arvalid),
+        .m_arready(br_s02_arready),.m_rid(br_s02_rid),
+        .m_rdata(br_s02_rdata),    .m_rresp(br_s02_rresp),
+        .m_rlast(br_s02_rlast),    .m_rvalid(br_s02_rvalid),
+        .m_rready(br_s02_rready)
+    );
 
     // =========================================================================
     // UART interrupt wiring
@@ -420,6 +603,22 @@ import el2_pkg::*;
         .dbg_bus_clk_en             (dbg_bus_clk_en),
         .dma_bus_clk_en             (dma_bus_clk_en),
 
+        // Debug halt/run — tie to "run after reset" (matches VeeR tb_top:
+        // mpc_reset_run_req=1, all halt/run req=0). Leaving these
+        // unconnected holds the core in halt (X) so no IFU/LSU AXI appears.
+        .mpc_debug_halt_req         (1'b0),
+        .mpc_debug_run_req          (1'b0),
+        .mpc_reset_run_req          (1'b1),
+        .mpc_debug_halt_ack         (),
+        .mpc_debug_run_ack          (),
+        .debug_brkpt_status         (),
+        .i_cpu_halt_req             (1'b0),
+        .o_cpu_halt_ack             (),
+        .o_cpu_halt_status          (),
+        .o_debug_mode_status        (),
+        .i_cpu_run_req              (1'b0),
+        .o_cpu_run_ack              (),
+
         // ECC (unused outputs)
         .iccm_ecc_single_error      (),
         .iccm_ecc_double_error      (),
@@ -572,154 +771,182 @@ import el2_pkg::*;
         // Slave (master) ports — CPU buses
         // ----------------------------------------------------------------
 
-        // s00 — LSU  (64→32 data: lower 32 bits of wdata, zero-extend rdata)
-        .s00_axi_awid       (s00_awid),
-        .s00_axi_awaddr     (lsu_awaddr),
-        .s00_axi_awlen      (lsu_awlen),
-        .s00_axi_awsize     (lsu_awsize),
-        .s00_axi_awburst    (lsu_awburst),
-        .s00_axi_awlock     (lsu_awlock),
-        .s00_axi_awcache    (lsu_awcache),
-        .s00_axi_awprot     (lsu_awprot),
-        .s00_axi_awqos      (lsu_awqos),
+        // s00 — LSU via 64→32 bridge
+        .s00_axi_awid       (br_s00_awid),
+        .s00_axi_awaddr     (br_s00_awaddr),
+        .s00_axi_awlen      (br_s00_awlen),
+        .s00_axi_awsize     (br_s00_awsize),
+        .s00_axi_awburst    (br_s00_awburst),
+        .s00_axi_awlock     (br_s00_awlock),
+        .s00_axi_awcache    (br_s00_awcache),
+        .s00_axi_awprot     (br_s00_awprot),
+        .s00_axi_awqos      (br_s00_awqos),
         .s00_axi_awuser     (1'b0),
-        .s00_axi_awvalid    (lsu_awvalid),
-        .s00_axi_awready    (lsu_awready),
-        .s00_axi_wdata      (lsu_wdata[31:0]),
-        .s00_axi_wstrb      (lsu_wstrb[3:0]),
-        .s00_axi_wlast      (lsu_wlast),
+        .s00_axi_awvalid    (br_s00_awvalid),
+        .s00_axi_awready    (br_s00_awready),
+        .s00_axi_wdata      (br_s00_wdata),
+        .s00_axi_wstrb      (br_s00_wstrb),
+        .s00_axi_wlast      (br_s00_wlast),
         .s00_axi_wuser      (1'b0),
-        .s00_axi_wvalid     (lsu_wvalid),
-        .s00_axi_wready     (lsu_wready),
-        .s00_axi_bid        (s00_bid_w),
-        .s00_axi_bresp      (lsu_bresp),
+        .s00_axi_wvalid     (br_s00_wvalid),
+        .s00_axi_wready     (br_s00_wready),
+        .s00_axi_bid        (br_s00_bid),
+        .s00_axi_bresp      (br_s00_bresp),
         .s00_axi_buser      (),
-        .s00_axi_bvalid     (lsu_bvalid),
-        .s00_axi_bready     (lsu_bready),
-        .s00_axi_arid       (s00_arid),
-        .s00_axi_araddr     (lsu_araddr),
-        .s00_axi_arlen      (lsu_arlen),
-        .s00_axi_arsize     (lsu_arsize),
-        .s00_axi_arburst    (lsu_arburst),
-        .s00_axi_arlock     (lsu_arlock),
-        .s00_axi_arcache    (lsu_arcache),
-        .s00_axi_arprot     (lsu_arprot),
-        .s00_axi_arqos      (lsu_arqos),
+        .s00_axi_bvalid     (br_s00_bvalid),
+        .s00_axi_bready     (br_s00_bready),
+        .s00_axi_arid       (br_s00_arid),
+        .s00_axi_araddr     (br_s00_araddr),
+        .s00_axi_arlen      (br_s00_arlen),
+        .s00_axi_arsize     (br_s00_arsize),
+        .s00_axi_arburst    (br_s00_arburst),
+        .s00_axi_arlock     (br_s00_arlock),
+        .s00_axi_arcache    (br_s00_arcache),
+        .s00_axi_arprot     (br_s00_arprot),
+        .s00_axi_arqos      (br_s00_arqos),
         .s00_axi_aruser     (1'b0),
-        .s00_axi_arvalid    (lsu_arvalid),
-        .s00_axi_arready    (lsu_arready),
-        .s00_axi_rid        (s00_rid_w),
-        .s00_axi_rdata      (xbar_s00_rdata),
-        .s00_axi_rresp      (lsu_rresp),
-        .s00_axi_rlast      (lsu_rlast),
+        .s00_axi_arvalid    (br_s00_arvalid),
+        .s00_axi_arready    (br_s00_arready),
+        .s00_axi_rid        (br_s00_rid),
+        .s00_axi_rdata      (br_s00_rdata),
+        .s00_axi_rresp      (br_s00_rresp),
+        .s00_axi_rlast      (br_s00_rlast),
         .s00_axi_ruser      (),
-        .s00_axi_rvalid     (lsu_rvalid),
-        .s00_axi_rready     (lsu_rready),
+        .s00_axi_rvalid     (br_s00_rvalid),
+        .s00_axi_rready     (br_s00_rready),
 
-        // s01 — IFU
-        .s01_axi_awid       (s01_awid),
-        .s01_axi_awaddr     (ifu_awaddr),
-        .s01_axi_awlen      (ifu_awlen),
-        .s01_axi_awsize     (ifu_awsize),
-        .s01_axi_awburst    (ifu_awburst),
-        .s01_axi_awlock     (ifu_awlock),
-        .s01_axi_awcache    (ifu_awcache),
-        .s01_axi_awprot     (ifu_awprot),
-        .s01_axi_awqos      (ifu_awqos),
+        // s01 — IFU via 64→32 bridge
+        .s01_axi_awid       (br_s01_awid),
+        .s01_axi_awaddr     (br_s01_awaddr),
+        .s01_axi_awlen      (br_s01_awlen),
+        .s01_axi_awsize     (br_s01_awsize),
+        .s01_axi_awburst    (br_s01_awburst),
+        .s01_axi_awlock     (br_s01_awlock),
+        .s01_axi_awcache    (br_s01_awcache),
+        .s01_axi_awprot     (br_s01_awprot),
+        .s01_axi_awqos      (br_s01_awqos),
         .s01_axi_awuser     (1'b0),
-        .s01_axi_awvalid    (ifu_awvalid),
-        .s01_axi_awready    (ifu_awready),
-        .s01_axi_wdata      (ifu_wdata[31:0]),
-        .s01_axi_wstrb      (ifu_wstrb[3:0]),
-        .s01_axi_wlast      (ifu_wlast),
+        .s01_axi_awvalid    (br_s01_awvalid),
+        .s01_axi_awready    (br_s01_awready),
+        .s01_axi_wdata      (br_s01_wdata),
+        .s01_axi_wstrb      (br_s01_wstrb),
+        .s01_axi_wlast      (br_s01_wlast),
         .s01_axi_wuser      (1'b0),
-        .s01_axi_wvalid     (ifu_wvalid),
-        .s01_axi_wready     (ifu_wready),
-        .s01_axi_bid        (s01_bid_w),
-        .s01_axi_bresp      (ifu_bresp),
+        .s01_axi_wvalid     (br_s01_wvalid),
+        .s01_axi_wready     (br_s01_wready),
+        .s01_axi_bid        (br_s01_bid),
+        .s01_axi_bresp      (br_s01_bresp),
         .s01_axi_buser      (),
-        .s01_axi_bvalid     (ifu_bvalid),
-        .s01_axi_bready     (ifu_bready),
-        .s01_axi_arid       (s01_arid),
-        .s01_axi_araddr     (ifu_araddr),
-        .s01_axi_arlen      (ifu_arlen),
-        .s01_axi_arsize     (ifu_arsize),
-        .s01_axi_arburst    (ifu_arburst),
-        .s01_axi_arlock     (ifu_arlock),
-        .s01_axi_arcache    (ifu_arcache),
-        .s01_axi_arprot     (ifu_arprot),
-        .s01_axi_arqos      (ifu_arqos),
+        .s01_axi_bvalid     (br_s01_bvalid),
+        .s01_axi_bready     (br_s01_bready),
+        .s01_axi_arid       (br_s01_arid),
+        .s01_axi_araddr     (br_s01_araddr),
+        .s01_axi_arlen      (br_s01_arlen),
+        .s01_axi_arsize     (br_s01_arsize),
+        .s01_axi_arburst    (br_s01_arburst),
+        .s01_axi_arlock     (br_s01_arlock),
+        .s01_axi_arcache    (br_s01_arcache),
+        .s01_axi_arprot     (br_s01_arprot),
+        .s01_axi_arqos      (br_s01_arqos),
         .s01_axi_aruser     (1'b0),
-        .s01_axi_arvalid    (ifu_arvalid),
-        .s01_axi_arready    (ifu_arready),
-        .s01_axi_rid        (s01_rid_w),
-        .s01_axi_rdata      (xbar_s01_rdata),
-        .s01_axi_rresp      (ifu_rresp),
-        .s01_axi_rlast      (ifu_rlast),
+        .s01_axi_arvalid    (br_s01_arvalid),
+        .s01_axi_arready    (br_s01_arready),
+        .s01_axi_rid        (br_s01_rid),
+        .s01_axi_rdata      (br_s01_rdata),
+        .s01_axi_rresp      (br_s01_rresp),
+        .s01_axi_rlast      (br_s01_rlast),
         .s01_axi_ruser      (),
-        .s01_axi_rvalid     (ifu_rvalid),
-        .s01_axi_rready     (ifu_rready),
+        .s01_axi_rvalid     (br_s01_rvalid),
+        .s01_axi_rready     (br_s01_rready),
 
-        // s02 — SB (debug)
-        .s02_axi_awid       (s02_awid),
-        .s02_axi_awaddr     (sb_awaddr),
-        .s02_axi_awlen      (sb_awlen),
-        .s02_axi_awsize     (sb_awsize),
-        .s02_axi_awburst    (sb_awburst),
-        .s02_axi_awlock     (sb_awlock),
-        .s02_axi_awcache    (sb_awcache),
-        .s02_axi_awprot     (sb_awprot),
-        .s02_axi_awqos      (sb_awqos),
+        // s02 — SB via 64→32 bridge
+        .s02_axi_awid       (br_s02_awid),
+        .s02_axi_awaddr     (br_s02_awaddr),
+        .s02_axi_awlen      (br_s02_awlen),
+        .s02_axi_awsize     (br_s02_awsize),
+        .s02_axi_awburst    (br_s02_awburst),
+        .s02_axi_awlock     (br_s02_awlock),
+        .s02_axi_awcache    (br_s02_awcache),
+        .s02_axi_awprot     (br_s02_awprot),
+        .s02_axi_awqos      (br_s02_awqos),
         .s02_axi_awuser     (1'b0),
-        .s02_axi_awvalid    (sb_awvalid),
-        .s02_axi_awready    (sb_awready),
-        .s02_axi_wdata      (sb_wdata[31:0]),
-        .s02_axi_wstrb      (sb_wstrb[3:0]),
-        .s02_axi_wlast      (sb_wlast),
+        .s02_axi_awvalid    (br_s02_awvalid),
+        .s02_axi_awready    (br_s02_awready),
+        .s02_axi_wdata      (br_s02_wdata),
+        .s02_axi_wstrb      (br_s02_wstrb),
+        .s02_axi_wlast      (br_s02_wlast),
         .s02_axi_wuser      (1'b0),
-        .s02_axi_wvalid     (sb_wvalid),
-        .s02_axi_wready     (sb_wready),
-        .s02_axi_bid        (s02_bid_w),
-        .s02_axi_bresp      (sb_bresp),
+        .s02_axi_wvalid     (br_s02_wvalid),
+        .s02_axi_wready     (br_s02_wready),
+        .s02_axi_bid        (br_s02_bid),
+        .s02_axi_bresp      (br_s02_bresp),
         .s02_axi_buser      (),
-        .s02_axi_bvalid     (sb_bvalid),
-        .s02_axi_bready     (sb_bready),
-        .s02_axi_arid       (s02_arid),
-        .s02_axi_araddr     (sb_araddr),
-        .s02_axi_arlen      (sb_arlen),
-        .s02_axi_arsize     (sb_arsize),
-        .s02_axi_arburst    (sb_arburst),
-        .s02_axi_arlock     (sb_arlock),
-        .s02_axi_arcache    (sb_arcache),
-        .s02_axi_arprot     (sb_arprot),
-        .s02_axi_arqos      (sb_arqos),
+        .s02_axi_bvalid     (br_s02_bvalid),
+        .s02_axi_bready     (br_s02_bready),
+        .s02_axi_arid       (br_s02_arid),
+        .s02_axi_araddr     (br_s02_araddr),
+        .s02_axi_arlen      (br_s02_arlen),
+        .s02_axi_arsize     (br_s02_arsize),
+        .s02_axi_arburst    (br_s02_arburst),
+        .s02_axi_arlock     (br_s02_arlock),
+        .s02_axi_arcache    (br_s02_arcache),
+        .s02_axi_arprot     (br_s02_arprot),
+        .s02_axi_arqos      (br_s02_arqos),
         .s02_axi_aruser     (1'b0),
-        .s02_axi_arvalid    (sb_arvalid),
-        .s02_axi_arready    (sb_arready),
-        .s02_axi_rid        (s02_rid_w),
-        .s02_axi_rdata      (xbar_s02_rdata),
-        .s02_axi_rresp      (sb_rresp),
-        .s02_axi_rlast      (sb_rlast),
+        .s02_axi_arvalid    (br_s02_arvalid),
+        .s02_axi_arready    (br_s02_arready),
+        .s02_axi_rid        (br_s02_rid),
+        .s02_axi_rdata      (br_s02_rdata),
+        .s02_axi_rresp      (br_s02_rresp),
+        .s02_axi_rlast      (br_s02_rlast),
         .s02_axi_ruser      (),
-        .s02_axi_rvalid     (sb_rvalid),
-        .s02_axi_rready     (sb_rready),
+        .s02_axi_rvalid     (br_s02_rvalid),
+        .s02_axi_rready     (br_s02_rready),
 
-        // s03 — NDA data (tied off)
-        .s03_axi_awid       ('0), .s03_axi_awaddr('0), .s03_axi_awlen('0),
-        .s03_axi_awsize     ('0), .s03_axi_awburst('0), .s03_axi_awlock('0),
-        .s03_axi_awcache    ('0), .s03_axi_awprot('0), .s03_axi_awqos('0),
-        .s03_axi_awuser     ('0), .s03_axi_awvalid(1'b0), .s03_axi_awready(),
-        .s03_axi_wdata      ('0), .s03_axi_wstrb('0), .s03_axi_wlast(1'b0),
-        .s03_axi_wuser      ('0), .s03_axi_wvalid(1'b0), .s03_axi_wready(),
-        .s03_axi_bid        (), .s03_axi_bresp(), .s03_axi_buser(),
-        .s03_axi_bvalid     (), .s03_axi_bready(1'b1),
-        .s03_axi_arid       ('0), .s03_axi_araddr('0), .s03_axi_arlen('0),
-        .s03_axi_arsize     ('0), .s03_axi_arburst('0), .s03_axi_arlock('0),
-        .s03_axi_arcache    ('0), .s03_axi_arprot('0), .s03_axi_arqos('0),
-        .s03_axi_aruser     ('0), .s03_axi_arvalid(1'b0), .s03_axi_arready(),
-        .s03_axi_rid        (), .s03_axi_rdata(), .s03_axi_rresp(),
-        .s03_axi_rlast      (), .s03_axi_ruser(), .s03_axi_rvalid(),
-        .s03_axi_rready     (1'b1),
+        // s03 — NDA seat: TB-driven test hooks (idle by default).
+        // No force needed; tb_core_uart drives tb_s03_* procedurally.
+        .s03_axi_awid       (tb_s03_awid),
+        .s03_axi_awaddr     (tb_s03_awaddr),
+        .s03_axi_awlen      (tb_s03_awlen),
+        .s03_axi_awsize     (tb_s03_awsize),
+        .s03_axi_awburst    (tb_s03_awburst),
+        .s03_axi_awlock     (1'b0),
+        .s03_axi_awcache    (4'b0),
+        .s03_axi_awprot     (3'b0),
+        .s03_axi_awqos      (4'b0),
+        .s03_axi_awuser     (1'b0),
+        .s03_axi_awvalid    (tb_s03_awvalid),
+        .s03_axi_awready    (tb_s03_awready),
+        .s03_axi_wdata      (tb_s03_wdata),
+        .s03_axi_wstrb      (tb_s03_wstrb),
+        .s03_axi_wlast      (tb_s03_wlast),
+        .s03_axi_wuser      (1'b0),
+        .s03_axi_wvalid     (tb_s03_wvalid),
+        .s03_axi_wready     (tb_s03_wready),
+        .s03_axi_bid        (tb_s03_bid),
+        .s03_axi_bresp      (tb_s03_bresp),
+        .s03_axi_buser      (),
+        .s03_axi_bvalid     (tb_s03_bvalid),
+        .s03_axi_bready     (tb_s03_bready),
+        .s03_axi_arid       (tb_s03_arid),
+        .s03_axi_araddr     (tb_s03_araddr),
+        .s03_axi_arlen      (tb_s03_arlen),
+        .s03_axi_arsize     (tb_s03_arsize),
+        .s03_axi_arburst    (tb_s03_arburst),
+        .s03_axi_arlock     (1'b0),
+        .s03_axi_arcache    (4'b0),
+        .s03_axi_arprot     (3'b0),
+        .s03_axi_arqos      (4'b0),
+        .s03_axi_aruser     (1'b0),
+        .s03_axi_arvalid    (tb_s03_arvalid),
+        .s03_axi_arready    (tb_s03_arready),
+        .s03_axi_rid        (tb_s03_rid),
+        .s03_axi_rdata      (tb_s03_rdata),
+        .s03_axi_rresp      (tb_s03_rresp),
+        .s03_axi_rlast      (tb_s03_rlast),
+        .s03_axi_ruser      (),
+        .s03_axi_rvalid     (tb_s03_rvalid),
+        .s03_axi_rready     (tb_s03_rready),
 
         // s04 — reserved (tied off)
         .s04_axi_awid       ('0), .s04_axi_awaddr('0), .s04_axi_awlen('0),
@@ -1035,20 +1262,17 @@ import el2_pkg::*;
         .m15_axi_rvalid(1'b0), .m15_axi_rready()
     );
 
-    // ID width adaptation (xbar returns XBAR_ID_W bits; VeeR wants narrower)
-    assign lsu_bid  = s00_bid_w[pt.LSU_BUS_TAG-1:0];
-    assign lsu_rid  = s00_rid_w[pt.LSU_BUS_TAG-1:0];
-    assign ifu_bid  = s01_bid_w[pt.IFU_BUS_TAG-1:0];
-    assign ifu_rid  = s01_rid_w[pt.IFU_BUS_TAG-1:0];
-    assign sb_bid   = s02_bid_w[pt.SB_BUS_TAG-1:0];
-    assign sb_rid   = s02_rid_w[pt.SB_BUS_TAG-1:0];
+    // NOTE: IDs and 64-bit data now round-trip through u_br_s00/s01/s02
+    // (no truncation); the old s0x_bid_w/xbar_s0x_rdata assigns are gone.
 
     // =========================================================================
-    // m00 DRAM stub — responds OKAY so VeeR boot fetch completes
+    // m00 DRAM — true RAM (NOP-filled without +SW_HEX, program image with it).
+    // Superset of the old NOP stub: VeeR boot fetches spin harmlessly in
+    // bring-up and execute real code in uart.sw.
     // =========================================================================
-    axi_stub_mem #(
-        .RESP        (2'b00),
-        .RDATA_VALUE (32'h0000_0013)
+    axi_true_mem #(
+        .MEM_BYTES (131072),          // 128 KB @ 0x0000_0000 (mirrored in window)
+        .NOP       (32'h0000_0013)   // RV NOP
     ) u_dram_stub (
         .clk        (clk),
         .rst        (~rst_n),
