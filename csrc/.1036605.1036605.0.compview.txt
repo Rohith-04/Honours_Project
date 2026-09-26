@@ -1,9 +1,0 @@
-{"vcs1":{"timestamp_begin":1789807410.273671634, "rt":1.62, "ut":0.21, "st":0.06}}
-{"vcselab":{"timestamp_begin":1789807411.930459318, "rt":1.15, "ut":0.11, "st":0.03}}
-{"link":{"timestamp_begin":1789807413.106625770, "rt":0.10, "ut":0.07, "st":0.03}}
-{"SNPS_VCS_INTERNAL_ROOT_START_TIME": 1789807409.984764729}
-{"VCS_COMP_START_TIME": 1789807409.984764729}
-{"VCS_COMP_END_TIME": 1789807413.279265846}
-{"VCS_USER_OPTIONS": "-full64 -sverilog -timescale=1ns/1ps +define+FSDB -kdb +vcs+lic+wait -debug_access+all -debug_region+cell -P /home/student/snps_tools_target/verdi/U-2023.03-SP1/share/PLI/VCS/LINUX64/novas.tab /home/student/snps_tools_target/verdi/U-2023.03-SP1/share/PLI/VCS/LINUX64/pli.a +incdir+/home/student/Desktop/Honours-34/Honours_Project/ips/uart/src/include -l /home/student/Desktop/Honours-34/Honours_Project/run/uart/compile.log -o /home/student/Desktop/Honours-34/Honours_Project/run/uart/simv /home/student/Desktop/Honours-34/Honours_Project/ips/uart/src/rtl/uart_parity_bit_compute.v /home/student/Desktop/Honours-34/Honours_Project/ips/uart/src/rtl/uart_receiver.v /home/student/Desktop/Honours-34/Honours_Project/ips/uart/src/rtl/uart_transmitter.v /home/student/Desktop/Honours-34/Honours_Project/ips/uart/src/rtl/uart_controller.v /home/student/Desktop/Honours-34/Honours_Project/ips/uart/src/rtl/axi_internal_fifo.v /home/student/Desktop/Honours-34/Honours_Project/ips/uart/src/rtl/axi_uart_top.v /home/student/Desktop/Honours-34/Honours_Project/rtl/uart/uart_wrap.sv /home/student/Desktop/Honours-34/Honours_Project/tb/tb_uart_wrap.sv"}
-{"vcs1": {"peak_mem": 534264}}
-{"vcselab": {"peak_mem": 251812}}
