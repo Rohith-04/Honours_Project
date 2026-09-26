@@ -69,8 +69,7 @@ Honours_Project/
 │   ├── wrappers/                # Project-specific CSR logic per IP
 │   │   ├── uart_wrapper.sv
 │   │   ├── timer_wrapper.sv
-│   │   ├── gpio_wrapper.sv
-│   │   └── wdt_wrapper.sv
+│   │   └── gpio_wrapper.sv
 │   └── mem/
 │       └── axi_ram.sv
 │
@@ -84,8 +83,7 @@ Honours_Project/
 │   ├── unit/                 # LEVEL 1 — BFM -> one wrapper. No interconnect, no core.
 │   │   ├── tb_uart_unit.sv
 │   │   ├── tb_timer_unit.sv
-│   │   ├── tb_gpio_unit.sv
-│   │   └── tb_wdt_unit.sv
+│   │   └── tb_gpio_unit.sv
 │   ├── integration/          # LEVEL 2 — BFM -> interconnect -> wrapper(s). No core.
 │   │   └── tb_soc_integration.sv
 │   └── sw/                   # LEVEL 3 — real VeeR core + compiled software. Only place core appears.
@@ -97,8 +95,7 @@ Honours_Project/
 │   │   └── linker.ld
 │   ├── uart_test/
 │   ├── timer_test/
-│   ├── gpio_test/
-│   └── wdt_test/
+│   └── gpio_test/
 │
 ├── scripts/
 │   ├── build_sw.sh
@@ -113,7 +110,6 @@ Honours_Project/
 │   ├── unit_uart.rc
 │   ├── unit_timer.rc
 │   ├── unit_gpio.rc
-│   ├── unit_wdt.rc
 │   ├── integration.rc
 │   └── sw.rc
 │
@@ -142,36 +138,52 @@ Honours_Project/
 
 ## 3. Interconnect Sizing
 
-- **Slaves (locked for baseline): RAM, UART, Timer, GPIO, WDT — 5 total.**
+- **Slaves (locked for baseline): RAM, UART, Timer, GPIO — 4 total.**
   Each gets an address range in `soc_pkg.sv` and its own wrapper in
   `rtl/wrappers/`.
+- **AXI ID width is 12 bits (`ID_WIDTH = 12`) everywhere** — BFM,
+  interconnect, wrappers, and testbenches. This matches the UART IP's
+  hardcoded 12-bit ID (`ips/uart`, `axi_uart_defines.vh`), so no width
+  adaptation is needed on the ID path.
 - **Masters: `NUM_MASTERS` is a real parameter, including arbitration
   logic, from day one — instantiated and verified at `NUM_MASTERS=1`
   now.** VeeR is the only master today. The NDA accelerator becomes a
   second master later (AXI4 DMA master port) — that addition should be a
   parameter bump and a port connection, not a rewrite of decode/arbitration
-  logic that already works for RAM/UART/Timer/GPIO/WDT.
-- **WDT is an AXI slave** for its register interface (config, kick,
-  status) — same pattern as every other peripheral, routed through the
-  same crossbar. Its separate signal-tap monitoring behavior (what it
-  watches to decide when to trip) is a later design decision and doesn't
-  affect its slave-port shape today.
+  logic that already works for RAM/UART/Timer/GPIO.
+
+### Reset polarity convention
+
+- **Internal standard is active-low `aresetn`.** Any wrapped IP with a
+  different reset polarity (e.g. the interconnect core's active-high
+  `rst`, or VeeR's active-low-but-named-`rst_l`) converts at its own
+  wrapper boundary. This is decided once here, not re-derived per
+  wrapper. (VeeR's `rst_l` is active-low, asynchronously asserted,
+  synchronously deasserted — VeeR EL2 Programmer's Reference Manual,
+  Memory Map chapter and Clock And Reset chapter.)
+
+### Timer and GPIO are custom RTL
+
+- Timer and GPIO have no external IP under `ips/` — they are fully
+  custom RTL written from scratch, living directly in `rtl/wrappers/`
+  with no separate "source of truth" IP core to wrap. This differs from
+  the UART pattern (wrap-only, IP untouched).
 
 ---
 
 ## 4. Verification Ladder (per IP)
 
-For each of UART / Timer / GPIO / WDT:
+For each of UART / Timer / GPIO:
 
 ```
 LEVEL 1 — tb/unit/tb_<ip>_unit.sv
     BFM --AXI--> <ip>_wrapper
     DUT = wrapper + CSR logic only. No interconnect, no core.
     Checks: register read/write behavior, IP-specific function
-    (UART TX/RX, timer count/compare, GPIO in/out/dir, WDT config/kick/status)
+    (UART TX/RX, timer count/compare, GPIO in/out/dir)
 
 LEVEL 2 — tb/integration/tb_soc_integration.sv
-    BFM --AXI--> interconnect --AXI--> <ip>_wrapper (all 5 slaves present)
+    BFM --AXI--> interconnect --AXI--> <ip>_wrapper (all 4 slaves present)
     DUT = interconnect address decode/routing + wrapper, together.
     Checks: correct slave selected per address, no cross-talk between
     peripherals, back-to-back transactions to different slaves.
@@ -194,9 +206,9 @@ A given IP is not "done" until it has passed all three levels.
 
 ```makefile
 # Targets map 1:1 onto tb/ directories
-make unit        IP=uart|timer|gpio|wdt
+make unit        IP=uart|timer|gpio
 make integration
-make sw          IP=uart|timer|gpio|wdt
+make sw          IP=uart|timer|gpio
 make verdi       LEVEL=unit|integration|sw   IP=<ip>   # opens waves/<level>_<ip>.rc
 make clean
 ```
@@ -239,12 +251,21 @@ that's the exact seam that gave the fault-traceability problem last time.
 
 ## 7. What's Deliberately Deferred
 
-- NDA accelerator, HPM, watchdog *behavior* (only WDT's register shell is
-  in baseline scope) — second wave, after RAM/UART/Timer/GPIO/WDT-shell
+- NDA accelerator, HPM, and WDT (the whole IP — not even a register
+  shell is in baseline scope) — second wave, after RAM/UART/Timer/GPIO
   pass all three verification levels.
 - WDT's signal-tap logic (what triggers a trip) — depends on decisions
   not yet made about what it's watching.
 - AXI4 signal-level HPM snoop details — open item, deferred to the HPM
   phase.
-- VeeR EL2 MPU data access window configuration for MMIO regions — open
-  item, needs resolving before or during Level 2/3 testing.
+- VeeR EL2 MPU data access windows — **resolved, no action needed.**
+  MPU windows are a VeeR core build-time argument (up to 8 instruction +
+  8 data windows, each with a base address and mask — not runtime
+  registers). If none of the 8 data windows are enabled, the MPU is
+  effectively off and all non-DCCM addresses pass through (VeeR EL2
+  Programmer's Reference Manual, Memory Map chapter). Verified: all 16
+  enables are `0x0` in this repo's `Cores-VeeR-EL2/configs/veer.config`
+  `protection` group, so no window can fault LSU accesses to RAM
+  (`0x0000_0000`–`0x0000_FFFF`) or peripherals
+  (`0x1000_0000`–`0x1002_0FFF`). Re-check only if build-time MPU
+  overrides are introduced.

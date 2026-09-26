@@ -11,6 +11,11 @@ run/
 !run/.gitkeep
 
 # Root-level VCS leftovers
+# NOTE: csrc/ is VCS's default working directory (created because make
+# invokes vcs from the repo root — see "Entering directory .../csrc" in
+# compile.log). It holds compiled objects/archives and is pure scratch:
+# safe to `rm -rf` any time (a rebuild recreates it), never commit it.
+csrc/
 *.cm
 *.so
 *.a

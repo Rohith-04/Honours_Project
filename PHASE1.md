@@ -1,7 +1,7 @@
 # Phase 1 — Baseline SoC IP Requirements
 
 Phase 1 goal: VeeR EL2 core + a minimal, correctly-verified set of
-peripherals, before any of the three custom IPs (NDA, HPM, WDT behavior)
+peripherals, before any of the custom IPs (NDA, HPM, WDT)
 are touched. This is the "basic IP requirements" your mentor directed —
 build the SoC bottom-up with a solid baseline first.
 
@@ -18,9 +18,9 @@ correct), not just correct signals in Verdi.
 
 These apply across all of Phase 1, not to one specific IP:
 
-- **AXI4, 32-bit data width, single master (VeeR) for now.**
-  `NUM_MASTERS` parameterized but instantiated at 1 (see
-  `PROJECT_STRUCTURE.md` §3).
+- **AXI4, 32-bit data width, 12-bit IDs, single master (VeeR) for now.**
+  `NUM_MASTERS` parameterized but instantiated at 1, `ID_WIDTH = 12`
+  everywhere (see `PROJECT_STRUCTURE.md` §3).
 - **Data-width adaptation is required and not optional.** VeeR EL2
   exposes 64-bit system AXI buses on its IFU and LSU interfaces; the
   interconnect here is 32-bit. Simply wiring the lower 32 bits of
@@ -44,10 +44,19 @@ These apply across all of Phase 1, not to one specific IP:
 | `0x1000_0000` – `0x1000_0FFF` | UART   |
 | `0x1001_0000` – `0x1001_0FFF` | Timer  |
 | `0x1002_0000` – `0x1002_0FFF` | GPIO   |
-| `0x1003_0000` – `0x1003_0FFF` | WDT    |
 
 (Adjust ranges if your address decode granularity differs — the point is
 this table exists in exactly one place: `soc_pkg.sv`.)
+
+- **Firmware must configure the `mrac` CSR at boot.**
+  `sw/common/startup.S` must write the `mrac` region access control
+  register (CSR `0x7C0`) to mark the peripheral region (region 1,
+  `0x1000_0000`–`0x1FFF_FFFF`, covering UART/Timer/GPIO) as
+  side-effecting (`sideeffect1` = 1) and non-cacheable (`cacheable1` =
+  0), followed by a `fence`. Reset value for these bits is 0, so without
+  this write MMIO register behavior (coalescing/buffering) is undefined.
+  Required per the VeeR EL2 Programmer's Reference Manual, Memory Map
+  chapter.
 
 ---
 
@@ -116,7 +125,11 @@ software without needing a physical board.
 ## 3. Timer
 
 **Purpose:** basic hardware timer — needed both as a baseline peripheral
-and later likely useful for the WDT and HPM.
+and later likely useful for the HPM (and, in Phase 2, the WDT).
+
+**Implementation note:** the timer is fully custom RTL with no external
+`ips/` source — `rtl/wrappers/timer_wrapper.sv` *is* the full
+implementation, not just CSR glue around a third-party core.
 
 **Register map (offsets from TIMER_BASE):**
 | Offset | Register | Function |
@@ -144,9 +157,13 @@ and later likely useful for the WDT and HPM.
 
 ## 4. GPIO
 
-**Purpose:** baseline peripheral, likely simplest of the four to bring
+**Purpose:** baseline peripheral, likely simplest of the three to bring
 up — useful as a first end-to-end proof of the ladder before UART/Timer
 complexity.
+
+**Implementation note:** GPIO is fully custom RTL with no external
+`ips/` source — `rtl/wrappers/gpio_wrapper.sv` *is* the full
+implementation, not just CSR glue around a third-party core.
 
 **Register map (offsets from GPIO_BASE):**
 | Offset | Register | Function |
@@ -171,47 +188,14 @@ complexity.
 
 ---
 
-## 5. WDT (register shell only — Phase 1 scope)
-
-**Purpose:** Phase 1 only builds the **register interface**, per the
-decision in `PROJECT_STRUCTURE.md` §3. The actual trip logic and signal
-taps (what it watches, when it fires) are explicitly deferred — this
-section covers only what's in scope now.
-
-**Register map (offsets from WDT_BASE) — placeholder, refine before
-implementation:**
-| Offset | Register | Function |
-|--------|----------|----------|
-| `0x00` | CTRL     | Enable/disable |
-| `0x04` | KICK     | Software "feed the dog" write |
-| `0x08` | STATUS   | Trip flag / current state |
-
-**Phase 1 requirements:**
-- Register interface only — CTRL/KICK/STATUS must be correctly
-  addressable and readable/writable through the same AXI slave pattern
-  as every other peripheral.
-- No trip logic yet — STATUS can be a stub (e.g. always reads 0, or a
-  simple counter with no consequence) until the tap-based design is
-  decided.
-
-**Verification:**
-- *Unit:* BFM writes CTRL/KICK, reads STATUS — confirms register
-  behavior only, not trip behavior (since trip logic doesn't exist yet).
-- *Integration:* confirms correct addressing through the interconnect.
-- *SW:* not required to demonstrate trip behavior yet — a simple
-  register read/write from C is enough to confirm the software path
-  works, same as the other IPs.
-
----
-
-## 6. Phase 1 Exit Criteria
+## 5. Phase 1 Exit Criteria
 
 Phase 1 is complete when:
-- [ ] RAM, UART, Timer, GPIO, WDT(shell) each have passing `tb/unit`
+- [ ] RAM, UART, Timer, GPIO each have passing `tb/unit`
       tests.
-- [ ] `tb/integration` passes with all 5 slaves present on the real
+- [ ] `tb/integration` passes with all 4 slaves present on the real
       interconnect (single master, VeeR only).
-- [ ] `tb/sw` passes for UART, Timer, GPIO, and WDT-shell — each
+- [ ] `tb/sw` passes for UART, Timer, and GPIO — each
       demonstrated via compiled C running on the real VeeR core, with
       results visible/checkable via UART console output.
 - [ ] The 64-to-32 AXI width adaptation is implemented and verified
@@ -220,5 +204,5 @@ Phase 1 is complete when:
 - [ ] `soc_pkg.sv` is the only place addresses/CSR offsets are defined;
       no hand-duplicated addresses in wrappers, testbenches, or C code.
 
-Only once this is true does Phase 2 (NDA accelerator, HPM, WDT trip
-logic) begin.
+Only once this is true does Phase 2 (NDA accelerator, HPM, WDT)
+begin.
