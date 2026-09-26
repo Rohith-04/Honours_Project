@@ -1,210 +1,324 @@
-# Near-Data Accelerator Extension for a VeeR EL2 RISC-V SoC — Honours Project
+# Near-Data Accelerator Extension for a VeeR EL2 RISC-V SoC
 
-## Overview
+An Honours project extending a **VeeR EL2 RV32IMC RISC-V SoC** with a custom **Near-Data Accelerator (NDA)** for memory-intensive reduction operations.
 
-Conventional von Neumann systems keep computation and data storage separate, forcing data
-to move through the memory hierarchy before the CPU can process it. For data-intensive
-workloads, the cost of moving data can far exceed the cost of the computation itself.
+The project is being developed as a complete SoC rather than as an isolated RTL block. It includes the processor, AXI4 interconnect, memory, peripherals, verification infrastructure, software tests, and the planned NDA, Hardware Performance Monitor (HPM), and watchdog.
 
-This project addresses that bottleneck by extending the **VeeR EL2 RV32IMC RISC-V SoC**
-with a custom **Near-Data Accelerator (NDA)**. The NDA is an independent AXI4 master with
-direct access to main memory. Instead of the CPU reading every element of an array, the
-processor issues a compact reduction command (sum, min, max, or argmax) and the NDA
-handles the element-by-element processing autonomously, returning only the final result.
+## Project Overview
 
-The design deliberately keeps the NDA small and does not assume it always outperforms
-software. The goal is to find and measure the crossover point: below some array size,
-software is faster due to setup and interrupt overhead; above it, the NDA saves enough
-memory-bus cycles to justify the hardware. The evaluation measures execution time, CPU
-cycles, memory transactions, NDA activity, interrupt overhead, and hardware resource cost
-across a range of array sizes.
+The NDA is intended to perform simple data-intensive operations close to the memory interface instead of requiring the CPU to load and process every element.
 
-## SoC Architecture
+Supported/planned operations include:
 
-The SoC is built around the unmodified VeeR EL2 core and its required peripherals. Three
-custom IP blocks are added:
+- Sum
+- Minimum
+- Maximum
+- Argmax
 
-| IP Block                      | Role                                                                      |
-|-------------------------------|---------------------------------------------------------------------------|
-| NDA Reduction Engine          | AXI4 master; performs sum, min, max, and argmax on arrays in main memory  |
-| Hardware Performance Monitor (HPM) | Records CPU cycles, memory bus transactions, NDA activity, and software fallbacks |
-| NDA Watchdog                  | Monitors NDA progress; triggers a software fallback if progress stalls    |
+A software command configures the NDA with an address range and operation. The NDA then accesses the data through its AXI4 master interface and reports completion through an interrupt.
 
-An AXI4 interconnect fabric routes transactions between the CPU, the NDA, and all slave
-peripherals. The 5-master, 16-slave configuration (`axi_interconnect_wrap_5x16`) is the
-target variant.
+The main objective is to measure the trade-off between CPU execution and hardware acceleration rather than assume that the accelerator is automatically beneficial. The evaluation will compare:
 
-### Master / Slave Port Map
+- Execution cycles
+- AXI bus transactions
+- Interrupt and setup overhead
+- Array size
+- Hardware resource usage
 
-| Port   | Role                              |
-|--------|-----------------------------------|
-| s00    | VeeR EL2 CPU AXI master           |
-| s01    | NDA Reduction Engine (data path)  |
-| s02–04 | Reserved / future expansion       |
-| m00–15 | Peripheral and memory slaves      |
+The expected result is a crossover point where NDA execution becomes more efficient than the software implementation.
 
-### NDA Interface Specification
+## Architecture
 
-The NDA exposes two AXI interfaces:
+### Phase 1: Baseline SoC
 
-- **Control/Status (AXI4-Lite slave):** Used by the CPU to write the base address, array
-  length, operation type, and start command, and to read back status, result, result index
-  (argmax), and watchdog progress.
-- **Data path (AXI4 master):** Used by the NDA to issue burst reads from main memory
-  without CPU involvement for each element.
+The current SoC contains:
 
-### Driver and Execution Flow
+| Block | Description |
+|---|---|
+| **VeeR EL2** | RV32IMC RISC-V processor core |
+| **AXI4 Interconnect** | Parameterised AXI4 fabric |
+| **64 KiB AXI RAM** | Program and data memory at `0x0000_0000` |
+| **UART** | Console output at `0x1000_0000` |
+| **Timer** | Free-running counter with compare/match interrupt at `0x1001_0000` |
+| **GPIO** | 8 bidirectional GPIO pins at `0x1002_0000` |
+| **64→32 AXI Adapter** | Converts the VeeR EL2 64-bit IFU/LSU interface to the 32-bit SoC fabric |
 
-1. **Initialisation:** The driver writes the base address, length, operation type, and
-   start command via the control interface.
-2. **Autonomous execution:** The NDA reads operand data from memory and performs the
-   reduction independently. The CPU is free to do other work.
-3. **Completion / fallback:** On completion the NDA raises an interrupt; the driver reads
-   the result. If the watchdog detects a stall, it prevents further memory transactions
-   and the driver falls back to a software reduction.
+The current configuration uses one AXI master and four slaves.
 
-## Repository Layout
+### Phase 2: NDA and Monitoring Hardware
 
-```
-Project/
-  doc/                               Design documentation and signal lists
-    Signal_List.md                   Custom IP signal definitions (NDA, Watchdog, HPM)
-    tb_axi_interconnect_5x16.md      Testbench documentation
-    Block diagram with Signal List.pdf
-    Honours_Abstract.pdf
+The second phase adds:
 
-  rtl/
-    interconnect/
-      axi_interconnect.v             Parameterised AXI4 interconnect core (Alex Forencich)
-      arbiter.v                      Round-robin arbiter with blocking and acknowledge
-      priority_encoder.v             Leading-one priority encoder used by the arbiter
+| Block | Description |
+|---|---|
+| **NDA Reduction Engine** | AXI4 master for reading array data and performing reductions |
+| **NDA Control Interface** | AXI4-Lite programming interface |
+| **Hardware Performance Monitor** | Tracks cycles, bus transactions, NDA activity, and software fallback activity |
+| **NDA Watchdog** | Detects stalled NDA operation and allows software fallback |
 
-  run/
-    axi_interconnect_wrap_5x16.v     Auto-generated 5×16 port-flattened wrapper
-    axi_interconnect_wrap_4x4.v      Auto-generated 4×4 variant (reference)
-    filelist.f                       Verdi elaboration file list
-    run.tcl                          UCLi script (run + quit)
-    run_sim.sh                       Top-level compile and simulation script
-    wave.rc                          Verdi nWave signal restore file
+The NDA is intended to connect to the existing parameterised AXI fabric as an additional master rather than requiring a new interconnect architecture.
 
-  scripts/
-    axi_interconnect_wrap.py         Python wrapper generator for arbitrary M×N configurations
+## AXI Interconnect
 
-  tb/
-    tb_axi_interconnect_5x16.sv      SystemVerilog testbench (VCS + Verdi)
+The interconnect is parameterised for:
+
+- Number of masters
+- Number of slaves
+- Address width
+- ID width
+- Slave base addresses
+- Slave address ranges
+
+The current SoC uses a **1-master × 4-slave** configuration with **12-bit AXI IDs**.
+
+A generator script produces flattened wrappers for different M×N configurations:
+
+```text
+scripts/axi_interconnect_wrap.py
 ```
 
-## Interconnect Design
+The crossbar uses store-and-forward buffering with skid buffers on the datapath.
 
-### Core
+Signals that are not part of the AXI transaction itself, such as NDA handshakes, watchdog status, HPM observation signals, and interrupts, remain separate sideband signals.
 
-The core module (`axi_interconnect.v`) implements a non-pipelined, store-and-forward
-crossbar:
+## Verification
 
-- A single 8-state FSM handles one transaction at a time per arbitration slot
-  (STATE_IDLE, STATE_DECODE, STATE_WRITE, STATE_WRITE_RESP, STATE_WRITE_DROP,
-  STATE_READ, STATE_READ_DROP, STATE_WAIT_IDLE)
-- A round-robin arbiter (`arbiter.v`) with blocking-acknowledge serialises competing
-  master requests; write and read channels are arbitrated independently
-- Address decode is performed combinationally against a configurable base-address and
-  address-width table; out-of-range accesses return DECERR (bresp/rresp = 2'b11)
-- Skid buffers on the W and R data paths decouple upstream and downstream ready signals
-  to avoid combinational ready loops
+Verification is organised into three levels:
 
-### Wrapper Generator
+```text
+unit → integration → software
+```
 
-`scripts/axi_interconnect_wrap.py` generates a Verilog wrapper for any M×N configuration.
-The wrapper unpacks and repacks the flat concatenated port vectors of the core into
-individually named AXI ports (`s00_axi_*`, `m00_axi_*`, …) as required by most SoC
-integration flows.
+### Level 1: Unit Verification
 
-Custom IP signals that sit outside the AXI bus (NDA/Watchdog handshakes, HPM snoop tap,
-interrupt lines) are documented in `doc/Signal_List.md`.
+Individual IP blocks are verified through their wrappers using a reusable AXI master BFM.
+
+Current unit tests cover:
+
+- GPIO
+- Timer
+- UART
+- RAM
+
+### Level 2: Integration Verification
+
+The complete AXI fabric is tested for:
+
+- Address decoding
+- Cross-talk between slaves
+- Back-to-back transactions
+- DECERR responses
+- Recovery after an error
+
+### Level 3: Software Verification
+
+Compiled RISC-V software is executed on the VeeR EL2 core.
+
+Tests verify the complete path:
+
+```text
+C program
+   ↓
+RISC-V compiler
+   ↓
+VeeR EL2
+   ↓
+64→32 AXI adapter
+   ↓
+AXI interconnect
+   ↓
+Peripheral / RAM
+```
+
+Software tests currently check console output, signature values, and `ebreak` retirement. The timer test also observes its interrupt line.
+
+### Verification Results
+
+Results below are from **VCS U-2023.03-SP1**, as of **2026-09-26**.
+
+| Test | Result |
+|---|---|
+| `make unit IP=gpio` | PASS — 17/17 checks |
+| `make unit IP=timer` | PASS — 17/17 checks |
+| `make unit IP=uart` | PASS — 15/15 checks |
+| `make unit IP=ram` | PASS — 17/17 checks |
+| `make integration` | PASS — 22 checks |
+| `make sw IP=gpio` | PASS |
+| `make sw IP=uart` | PASS |
+| `make sw IP=timer` | PASS |
+
+## AXI Master BFM
+
+The reusable BFM is located at:
+
+```text
+bfm/axi_master_bfm.sv
+```
+
+It models the 32-bit AXI master interface used by the SoC fabric.
+
+The BFM supports the transaction patterns required by the current IP and RAM tests. It also includes a timeout so that a stalled transaction terminates the simulation instead of hanging indefinitely.
+
+At the software-verification level, the BFM is removed from the datapath and the VeeR EL2 core becomes the actual AXI master through the width adapter.
 
 ## Simulation
 
 ### Requirements
 
-- Synopsys VCS (tested: U-2023.03-SP1)
-- Synopsys Verdi (tested: U-2023.03-SP1)
+The current verification environment requires:
 
-### Running the Simulation
+- Synopsys VCS, tested with `U-2023.03-SP1`
+- Verdi for waveform inspection
+- `riscv64-unknown-elf-gcc`
+- `perl` for VeeR configuration
 
-All commands are run from the project root.
+The RISC-V toolchain is expected to be available through `PATH`. The build also falls back to:
 
-Compile and simulate:
-
-```
-./run/run_sim.sh
-```
-
-Compile, simulate, and open Verdi with the pre-configured waveform view:
-
-```
-./run/run_sim.sh gui
+```text
+/opt/riscv
 ```
 
-Remove all build artefacts:
+when required.
 
+### Common Commands
+
+#### Unit tests
+
+```bash
+make unit IP=gpio
+make unit IP=timer
+make unit IP=uart
+make unit IP=ram
 ```
-./run/run_sim.sh clean
+
+#### Integration test
+
+```bash
+make integration
 ```
 
-Logs are written to `run/compile.log` and `run/sim.log`. The FSDB waveform is written to
-`run/tb_axi_interconnect_5x16.fsdb`.
+For the interconnect path monitor:
 
-### Waveform View
+```bash
+make integration DEFINES=+define+SOC_DEBUG
+```
 
-`run/wave.rc` is a Verdi nWave signal restore file. It pre-loads the following signal
-groups: Clock & Reset, Master 0 AW/W/B, Master 0 AR/R, Slave 0 AW/W/B, Slave 0 AR/R,
-and Arbiter. It is loaded automatically by `run_sim.sh gui` via the `-sswr` flag.
+#### Software tests
 
-## Test Plan (Interconnect)
+```bash
+make sw IP=gpio
+make sw IP=uart
+make sw IP=timer
+```
 
-The testbench (`tb/tb_axi_interconnect_5x16.sv`) covers five test cases:
+These commands build the software image, boot the VeeR EL2 core, and check the expected console output, signature, and `ebreak` retirement.
 
-| TC | Description                                            | Transactions |
-|----|--------------------------------------------------------|--------------|
-| 1  | Single write + read, all 5 masters × 16 slaves         | 160          |
-| 2  | Back-to-back INCR bursts (len=7) with read-back verify | 16           |
-| 3  | Decode error: out-of-bounds address (DECERR expected)  | 2            |
-| 4  | Round-robin fairness: 5 masters concurrent to slave 0  | 5            |
-| 5  | Partial write-strobe write with read-back verify       | 3            |
+#### Waveforms
 
-A scoreboard with a sparse reference memory model checks every read response against the
-expected value derived from preceding writes.
+```bash
+make verdi LEVEL=unit IP=<ip>
+make verdi LEVEL=integration
+make verdi LEVEL=sw IP=<ip>
+```
+
+#### Clean build
+
+```bash
+make clean
+rm -rf csrc
+```
+
+`csrc` contains shared incremental compilation state and may need to be removed when debugging stale build artifacts.
+
+### Simulation Output
+
+Simulation logs are written to:
+
+```text
+run/<target>/sim.log
+```
+
+Debug tracing can be enabled through plusargs without rebuilding:
+
+```text
++ADP_DEBUG
++XBAR_DEBUG
+```
+
+## Repository Structure
+
+```text
+Honours_Project/
+├── Cores-VeeR-EL2/          # VeeR EL2 core source
+├── ips/
+│   └── uart/                # Third-party UART
+├── rtl/
+│   ├── soc/                 # SoC top-level, package, AXI adapter
+│   ├── interconnect/        # Parameterised AXI4 interconnect
+│   ├── wrappers/            # Peripheral wrappers and protocol glue
+│   └── mem/                 # AXI RAM
+├── bfm/                     # Reusable AXI4 master BFM
+├── tb/
+│   ├── unit/                # Level 1 tests
+│   ├── integration/         # Level 2 tests
+│   └── sw/                  # Level 3 software tests
+├── sw/
+│   ├── common/              # Startup, linker script, drivers
+│   └── *_test/              # Peripheral-specific software tests
+├── scripts/                 # Build and generation scripts
+├── doc/                     # Architecture, interface, and verification docs
+├── run/                     # Simulation output
+├── build/                   # Generated VeeR configuration
+└── waves/                   # Waveform files/views
+```
 
 ## Current Status
 
-| Item                          | Status                          |
-|-------------------------------|---------------------------------|
-| Interconnect RTL              | Complete                        |
-| Wrapper generator (5×16)      | Complete                        |
-| Testbench (TC1–TC5)           | Complete                        |
-| Simulation (VCS)              | Passing — 96/96 checks, 0 fails |
-| Waveform debug (Verdi)        | Working                         |
-| NDA Reduction Engine RTL      | In progress                     |
-| NDA Watchdog RTL              | In progress                     |
-| Hardware Performance Monitor  | In progress                     |
-| Full SoC integration          | Not started                     |
-| Synthesis / timing closure    | Not started                     |
+### Completed
 
-## Known Limitations
+- VeeR EL2 integrated into the SoC
+- Parameterised AXI4 interconnect
+- 64 KiB AXI RAM
+- UART integration
+- Timer RTL and integration
+- GPIO RTL and integration
+- 64-bit to 32-bit AXI adapter
+- Reusable AXI master BFM
+- Unit verification
+- AXI interconnect integration verification
+- Software-level peripheral verification
+- Reproducible ELF-to-hex software flow
+- Centralised SoC memory map
 
-- The interconnect serialises all transactions through a single FSM. There is no
-  concurrent multi-master throughput; a second master must wait for the current
-  transaction to reach STATE_WAIT_IDLE before arbitration runs again.
-- The testbench slave BFM uses SystemVerilog associative arrays for memory, which are
-  not synthesisable. They are simulation-only constructs.
-- TC4 verifies the absence of deadlock under concurrent access but does not measure or
-  assert the arbitration order quantitatively.
-- The watchdog detects lack of progress and blocks new memory transactions after a timeout
-  but does not interrupt an AXI burst already in progress.
+### In Progress / Planned
 
-## Dependencies and Licensing
+- NDA reduction engine
+- NDA AXI4 master interface
+- NDA AXI4-Lite control interface
+- Hardware Performance Monitor
+- NDA watchdog
+- Two-master AXI configuration
+- Software driver for NDA operations
+- Software versus NDA performance measurements
+- FPGA implementation
+- Hardware resource and timing measurements
 
-The interconnect core (`rtl/interconnect/`) is derived from the open-source work of
-Alex Forencich and is used under the MIT License. See the file header in
-`rtl/interconnect/axi_interconnect.v` for the full licence text.
+## Limitations
 
-All other files in this repository are original work produced for the Honours project.
+The current implementation has several known limitations:
+
+1. The interconnect currently serialises transactions through a single FSM. This is sufficient for the current single-master configuration but will need to be revisited when the NDA becomes a concurrent second master.
+
+2. Timer software testing currently uses polling. The timer interrupt line is observed by the testbench but is not yet serviced by software running on the core.
+
+3. The current memory models are simulation-only. Synthesis and timing closure have not yet been performed.
+
+4. The NDA, HPM, and watchdog are planned Phase 2 hardware. Performance crossover results therefore do not exist yet.
+
+## External IP and Licensing
+
+The VeeR EL2 core is open-source hardware from Western Digital / CHIPS Alliance.
+
+The AXI interconnect is derived from Alex Forencich's open-source AXI infrastructure and is distributed under the MIT license where indicated by the source headers.
+
+Third-party components retain their respective licenses. Project-specific RTL and verification infrastructure are original work for this Honours project.
