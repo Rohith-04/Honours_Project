@@ -1,0 +1,123 @@
+; waves/sw_timer.rc -- nWave signal restore for `make verdi LEVEL=sw IP=timer`
+; (tb_soc_sw + VeeR + adapter + honours_soc). Load: Verdi -> File -> Restore
+; Signal, or `verdi -ssf tb_soc_sw.fsdb -sswr waves/sw_timer.rc`.
+; Syntax: Appendix B, Verdi and Siloti Command Reference Manual.
+; $$top resolves to the single FSDB top (tb_soc_sw).
+
+addGroup "-e" "clk_rst"
+addSignal -h 15 $$top/clk
+addSignal -h 15 $$top/aresetn
+
+addGroup "-e" "ifu_axi_64b"
+addSignal -h 15 $$top/ifu_arvalid
+addSignal -h 15 $$top/ifu_arready
+addSignal -h 15 -HEX $$top/ifu_araddr
+addSignal -h 15 $$top/ifu_arid
+addSignal -h 15 $$top/ifu_arlen
+addSignal -h 15 $$top/ifu_arsize
+addSignal -h 15 $$top/ifu_arburst
+addSignal -h 15 $$top/ifu_rvalid
+addSignal -h 15 $$top/ifu_rready
+addSignal -h 15 -HEX $$top/ifu_rdata
+addSignal -h 15 $$top/ifu_rresp
+addSignal -h 15 $$top/ifu_rlast
+addSignal -h 15 $$top/ifu_awvalid
+addSignal -h 15 $$top/ifu_awready
+addSignal -h 15 $$top/ifu_wvalid
+addSignal -h 15 $$top/ifu_wready
+addSignal -h 15 -HEX $$top/ifu_wdata
+addSignal -h 15 $$top/ifu_wstrb
+addSignal -h 15 $$top/ifu_bvalid
+addSignal -h 15 $$top/ifu_bready
+addSignal -h 15 $$top/ifu_bresp
+
+addGroup "-e" "lsu_axi_64b"
+addSignal -h 15 $$top/lsu_awvalid
+addSignal -h 15 $$top/lsu_awready
+addSignal -h 15 -HEX $$top/lsu_awaddr
+addSignal -h 15 $$top/lsu_awid
+addSignal -h 15 $$top/lsu_awlen
+addSignal -h 15 $$top/lsu_awsize
+addSignal -h 15 $$top/lsu_awburst
+addSignal -h 15 $$top/lsu_wvalid
+addSignal -h 15 $$top/lsu_wready
+addSignal -h 15 -HEX $$top/lsu_wdata
+addSignal -h 15 $$top/lsu_wstrb
+addSignal -h 15 $$top/lsu_wlast
+addSignal -h 15 $$top/lsu_bvalid
+addSignal -h 15 $$top/lsu_bready
+addSignal -h 15 $$top/lsu_bresp
+addSignal -h 15 $$top/lsu_arvalid
+addSignal -h 15 $$top/lsu_arready
+addSignal -h 15 -HEX $$top/lsu_araddr
+addSignal -h 15 $$top/lsu_arid
+addSignal -h 15 $$top/lsu_arlen
+addSignal -h 15 $$top/lsu_arsize
+addSignal -h 15 $$top/lsu_arburst
+addSignal -h 15 $$top/lsu_rvalid
+addSignal -h 15 $$top/lsu_rready
+addSignal -h 15 -HEX $$top/lsu_rdata
+addSignal -h 15 $$top/lsu_rresp
+addSignal -h 15 $$top/lsu_rlast
+
+addGroup "-e" "sb_axi_quiet"
+addSignal -h 15 $$top/sb_awvalid
+addSignal -h 15 $$top/sb_awready
+addSignal -h 15 $$top/sb_wvalid
+addSignal -h 15 $$top/sb_bvalid
+addSignal -h 15 $$top/sb_arvalid
+addSignal -h 15 $$top/sb_arready
+addSignal -h 15 $$top/sb_rvalid
+
+addGroup "-e" "adapter_soc32"
+addSignal -h 15 $$top/u_adapter/state
+addSignal -h 15 $$top/u_adapter/m_awvalid
+addSignal -h 15 $$top/u_adapter/m_awready
+addSignal -h 15 -HEX $$top/u_adapter/m_awaddr
+addSignal -h 15 $$top/u_adapter/m_awsize
+addSignal -h 15 $$top/u_adapter/m_wvalid
+addSignal -h 15 $$top/u_adapter/m_wready
+addSignal -h 15 -HEX $$top/u_adapter/m_wdata
+addSignal -h 15 $$top/u_adapter/m_wstrb
+addSignal -h 15 $$top/u_adapter/m_wlast
+addSignal -h 15 $$top/u_adapter/m_bvalid
+addSignal -h 15 $$top/u_adapter/m_bready
+addSignal -h 15 $$top/u_adapter/m_bresp
+addSignal -h 15 $$top/u_adapter/m_arvalid
+addSignal -h 15 $$top/u_adapter/m_arready
+addSignal -h 15 -HEX $$top/u_adapter/m_araddr
+addSignal -h 15 $$top/u_adapter/m_arsize
+addSignal -h 15 $$top/u_adapter/m_rvalid
+addSignal -h 15 $$top/u_adapter/m_rready
+addSignal -h 15 -HEX $$top/u_adapter/m_rdata
+addSignal -h 15 $$top/u_adapter/m_rresp
+addSignal -h 15 $$top/u_adapter/m_rlast
+
+addGroup "-e" "trace_ebreak"
+addSignal -h 15 $$top/tr_valid
+addSignal -h 15 -HEX $$top/tr_insn
+addSignal -h 15 $$top/tr_exc
+addSignal -h 15 $$top/tr_cause
+addSignal -h 15 $$top/saw_ebreak
+
+addGroup "-e" "timer_m02"
+addSignal -h 15 $$top/timer_irq_mon
+addSignal -h 15 $$top/saw_timer_irq
+addSignal -h 15 $$top/dut/u_timer/enable
+addSignal -h 15 $$top/dut/u_timer/match
+addSignal -h 15 -HEX $$top/dut/u_timer/count
+addSignal -h 15 -HEX $$top/dut/u_timer/compare
+addSignal -h 15 $$top/dut/u_timer/irq_o
+addSignal -h 15 $$top/dut/m_axi_awvalid[2]
+addSignal -h 15 $$top/dut/m_axi_awready[2]
+addSignal -h 15 $$top/dut/m_axi_wvalid[2]
+addSignal -h 15 $$top/dut/m_axi_wready[2]
+addSignal -h 15 $$top/dut/m_axi_bvalid[2]
+addSignal -h 15 $$top/dut/m_axi_bready[2]
+addSignal -h 15 $$top/dut/m_axi_bresp[2]
+addSignal -h 15 $$top/dut/m_axi_arvalid[2]
+addSignal -h 15 $$top/dut/m_axi_arready[2]
+addSignal -h 15 $$top/dut/m_axi_rvalid[2]
+addSignal -h 15 $$top/dut/m_axi_rready[2]
+addSignal -h 15 -HEX $$top/dut/m_axi_rdata[2]
+addSignal -h 15 $$top/dut/m_axi_rresp[2]

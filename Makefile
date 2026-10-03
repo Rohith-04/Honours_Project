@@ -11,7 +11,8 @@
 #
 # Plain runs need only VCS. Verdi runs additionally need VERDI_HOME set
 # (for the FSDB PLI) and recompile with -debug_access+all + FSDB_DUMP.
-# Wave .rc files are curated later; verdi opens without one for now.
+# `make verdi LEVEL=sw` preloads waves/sw_<ip>.rc (IFU/LSU/SB, adapter,
+# trace, per-test peripheral group); unit/integration open without one.
 #
 # SW tests additionally need riscv64-unknown-elf-gcc in PATH (lab machine /
 # VeeR flow) and perl (for the VeeR config generator, usually present).
@@ -238,9 +239,10 @@ verdi:
 	        $(sw_FILES); \
 	    echo "[make] simulating sw $(IP)..."; \
 	    cd $(PROJ_ROOT)/run/sw_$(IP) && ./simv -l sim.log +SW_TEST=$(IP) +SW_HEX=test.hex; \
-	    echo "[make] opening Verdi (no .rc yet — add waves/sw.rc later)..."; \
+	    echo "[make] opening Verdi with waves/sw_$(IP).rc..."; \
 	    $(VERDI) -dbdir $(PROJ_ROOT)/run/sw_$(IP)/simv.daidir \
-	             -ssf $(PROJ_ROOT)/run/sw_$(IP)/$(sw_TOP).fsdb & \
+	             -ssf $(PROJ_ROOT)/run/sw_$(IP)/$(sw_TOP).fsdb \
+	             -sswr $(PROJ_ROOT)/waves/sw_$(IP).rc & \
 	else \
 	    echo "unknown LEVEL '$(LEVEL)' (unit|integration|sw)"; exit 1; \
 	fi
