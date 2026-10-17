@@ -473,26 +473,47 @@ module nda_wrapper #(
             fsm          <= DRAIN;
           end
 
-          // --- Completion check (all elements received) ---
-          if (elem_received == total_elements) begin
-            done_flag <= 1'b1;
-            // Latch results
-            case (op_reg)
-              soc_pkg::NDA_OP_SUM: begin
-                result_lo_reg <= sum_acc[31:0];
-                result_hi_reg <= sum_acc[63:32];
-              end
-              soc_pkg::NDA_OP_MIN, soc_pkg::NDA_OP_MAX: begin
-                result_lo_reg <= best_val;
-                result_hi_reg <= 32'h0;
-              end
-              soc_pkg::NDA_OP_ARGMAX: begin
-                result_lo_reg <= best_val;
-                result_hi_reg <= best_idx;
-              end
-              default: ;
-            endcase
-            fsm <= IDLE;
+          // --- Completion check (all elements received, including this cycle) ---
+          begin : completion_check
+            logic [31:0] recv_after;
+            logic [63:0] next_sum;
+            logic [31:0] next_best;
+            logic [31:0] next_bidx;
+            logic        this_beat;
+            this_beat = r_fire && (m_axi_rresp == 2'b00);
+            recv_after = elem_received + (this_beat ? 32'd1 : 32'd0);
+            // Compute next-cycle accumulator values for latching
+            next_sum  = sum_acc + (this_beat ? $signed(m_axi_rdata) : 64'sd0);
+            next_best = (this_beat && ($signed(m_axi_rdata) > $signed(best_val))) ?
+                         m_axi_rdata : best_val;
+            next_bidx = (this_beat && ($signed(m_axi_rdata) > $signed(best_val))) ?
+                         elem_idx : best_idx;
+            if (recv_after == total_elements && total_elements != 0 &&
+                !abort_req) begin
+              done_flag <= 1'b1;
+              case (op_reg)
+                soc_pkg::NDA_OP_SUM: begin
+                  result_lo_reg <= next_sum[31:0];
+                  result_hi_reg <= next_sum[63:32];
+                end
+                soc_pkg::NDA_OP_MIN: begin
+                  result_lo_reg <= (this_beat &&
+                    ($signed(m_axi_rdata) < $signed(best_val))) ?
+                    m_axi_rdata : best_val;
+                  result_hi_reg <= 32'h0;
+                end
+                soc_pkg::NDA_OP_MAX: begin
+                  result_lo_reg <= next_best;
+                  result_hi_reg <= 32'h0;
+                end
+                soc_pkg::NDA_OP_ARGMAX: begin
+                  result_lo_reg <= next_best;
+                  result_hi_reg <= next_bidx;
+                end
+                default: ;
+              endcase
+              fsm <= IDLE;
+            end
           end
         end
 

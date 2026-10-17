@@ -268,7 +268,7 @@ module tb_nda_unit;
     nda_write(bfm_if, soc_pkg::NDA_SRC_BASE, 32'h2000_0000, resp);
     nda_write(bfm_if, soc_pkg::NDA_LEN, 32'h4, resp);
     nda_write(bfm_if, soc_pkg::NDA_CTRL, 32'h1, resp);
-    @(posedge clk);
+    repeat (5) @(posedge clk);
     nda_read(bfm_if, soc_pkg::NDA_STATUS, status, resp);
     check_equal("bad_addr_code", soc_pkg::NDA_ERR_BAD_ADDR, status[7:4]);
     nda_write(bfm_if, soc_pkg::NDA_STATUS, 32'h6, resp);
@@ -283,7 +283,7 @@ module tb_nda_unit;
     nda_write(bfm_if, soc_pkg::NDA_SRC_BASE, 32'h0000_0000, resp);
     nda_write(bfm_if, soc_pkg::NDA_LEN, 32'h4001, resp); // 16385 elements = 65540 bytes > 64K
     nda_write(bfm_if, soc_pkg::NDA_CTRL, 32'h1, resp);
-    @(posedge clk);
+    repeat (5) @(posedge clk);
     nda_read(bfm_if, soc_pkg::NDA_STATUS, status, resp);
     check_equal("bad_range_code", soc_pkg::NDA_ERR_BAD_RANGE, status[7:4]);
     nda_write(bfm_if, soc_pkg::NDA_STATUS, 32'h6, resp);
@@ -292,7 +292,7 @@ module tb_nda_unit;
     nda_write(bfm_if, soc_pkg::NDA_OP, 32'h4, resp); // bad op
     nda_write(bfm_if, soc_pkg::NDA_LEN, 32'h0, resp); // bad len
     nda_write(bfm_if, soc_pkg::NDA_CTRL, 32'h1, resp);
-    @(posedge clk);
+    repeat (5) @(posedge clk);
     nda_read(bfm_if, soc_pkg::NDA_STATUS, status, resp);
     check_equal("check_order_len_first", soc_pkg::NDA_ERR_BAD_LEN, status[7:4]);
     nda_write(bfm_if, soc_pkg::NDA_STATUS, 32'h6, resp);
