@@ -109,4 +109,61 @@ task automatic gpio_read(
   bfm.read(soc_pkg::GPIO_BASE + offset, data, resp);
 endtask
 
+// --- NDA helpers ---------------------------------------------------------------
+task automatic nda_write(
+  virtual axi_master_bfm bfm,
+  input logic [31:0] offset,
+  input logic [31:0] data,
+  output logic [1:0] resp
+);
+  bfm.write(soc_pkg::NDA_BASE + offset, data, 4'hF, resp);
+endtask
+
+task automatic nda_read(
+  virtual axi_master_bfm bfm,
+  input logic [31:0]  offset,
+  output logic [31:0] data,
+  output logic [1:0]  resp
+);
+  bfm.read(soc_pkg::NDA_BASE + offset, data, resp);
+endtask
+
+// --- WDT helpers ---------------------------------------------------------------
+task automatic wdt_write(
+  virtual axi_master_bfm bfm,
+  input logic [31:0] offset,
+  input logic [31:0] data,
+  output logic [1:0] resp
+);
+  bfm.write(soc_pkg::WDT_BASE + offset, data, 4'hF, resp);
+endtask
+
+task automatic wdt_read(
+  virtual axi_master_bfm bfm,
+  input logic [31:0]  offset,
+  output logic [31:0] data,
+  output logic [1:0]  resp
+);
+  bfm.read(soc_pkg::WDT_BASE + offset, data, resp);
+endtask
+
+// --- HPM helpers ---------------------------------------------------------------
+task automatic hpm_write(
+  virtual axi_master_bfm bfm,
+  input logic [31:0] offset,
+  input logic [31:0] data,
+  output logic [1:0] resp
+);
+  bfm.write(soc_pkg::HPM_BASE + offset, data, 4'hF, resp);
+endtask
+
+task automatic hpm_read(
+  virtual axi_master_bfm bfm,
+  input logic [31:0]  offset,
+  output logic [31:0] data,
+  output logic [1:0]  resp
+);
+  bfm.read(soc_pkg::HPM_BASE + offset, data, resp);
+endtask
+
 `endif

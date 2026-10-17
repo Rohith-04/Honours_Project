@@ -103,16 +103,21 @@ addSignal -h 15 $$top/saw_ebreak
 addGroup "-e" "uart_m01"
 addSignal -h 15 $$top/uart_tx_mon
 addSignal -h 15 $$top/uart_irq_mon
-addSignal -h 15 $$top/dut/m_axi_awvalid[1]
-addSignal -h 15 $$top/dut/m_axi_awready[1]
-addSignal -h 15 $$top/dut/m_axi_wvalid[1]
-addSignal -h 15 $$top/dut/m_axi_wready[1]
-addSignal -h 15 $$top/dut/m_axi_bvalid[1]
-addSignal -h 15 $$top/dut/m_axi_bready[1]
-addSignal -h 15 $$top/dut/m_axi_bresp[1]
-addSignal -h 15 $$top/dut/m_axi_arvalid[1]
-addSignal -h 15 $$top/dut/m_axi_arready[1]
-addSignal -h 15 $$top/dut/m_axi_rvalid[1]
-addSignal -h 15 $$top/dut/m_axi_rready[1]
-addSignal -h 15 -HEX $$top/dut/m_axi_rdata[1]
-addSignal -h 15 $$top/dut/m_axi_rresp[1]
+addSignal -h 15 $$top/dut/u_xbar/m01_axi_awvalid
+addSignal -h 15 $$top/dut/u_xbar/m01_axi_awready
+addSignal -h 15-HEX $$top/dut/u_xbar/m01_axi_awaddr
+addSignal -h 15 $$top/dut/u_xbar/m01_axi_wvalid
+addSignal -h 15 $$top/dut/u_xbar/m01_axi_wready
+addSignal -h 15-HEX $$top/dut/u_xbar/m01_axi_wdata
+addSignal -h 15 $$top/dut/u_xbar/m01_axi_wstrb
+addSignal -h 15 $$top/dut/u_xbar/m01_axi_bvalid
+addSignal -h 15 $$top/dut/u_xbar/m01_axi_bready
+addSignal -h 15 $$top/dut/u_xbar/m01_axi_bresp
+addSignal -h 15 $$top/dut/u_xbar/m01_axi_arvalid
+addSignal -h 15 $$top/dut/u_xbar/m01_axi_arready
+addSignal -h 15-HEX $$top/dut/u_xbar/m01_axi_araddr
+addSignal -h 15 $$top/dut/u_xbar/m01_axi_rvalid
+addSignal -h 15 $$top/dut/u_xbar/m01_axi_rready
+addSignal -h 15-HEX $$top/dut/u_xbar/m01_axi_rdata
+addSignal -h 15 $$top/dut/u_xbar/m01_axi_rresp
+addSignal -h 15 $$top/dut/u_xbar/m01_axi_rlast

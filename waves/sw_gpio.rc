@@ -107,16 +107,21 @@ addSignal -h 15 -HEX $$top/dut/gpio_out
 addSignal -h 15 -HEX $$top/dut/u_gpio/out_reg
 addSignal -h 15 -HEX $$top/dut/u_gpio/dir_reg
 addSignal -h 15 -HEX $$top/dut/u_gpio/in_sync
-addSignal -h 15 $$top/dut/m_axi_awvalid[3]
-addSignal -h 15 $$top/dut/m_axi_awready[3]
-addSignal -h 15 $$top/dut/m_axi_wvalid[3]
-addSignal -h 15 $$top/dut/m_axi_wready[3]
-addSignal -h 15 $$top/dut/m_axi_bvalid[3]
-addSignal -h 15 $$top/dut/m_axi_bready[3]
-addSignal -h 15 $$top/dut/m_axi_bresp[3]
-addSignal -h 15 $$top/dut/m_axi_arvalid[3]
-addSignal -h 15 $$top/dut/m_axi_arready[3]
-addSignal -h 15 $$top/dut/m_axi_rvalid[3]
-addSignal -h 15 $$top/dut/m_axi_rready[3]
-addSignal -h 15 -HEX $$top/dut/m_axi_rdata[3]
-addSignal -h 15 $$top/dut/m_axi_rresp[3]
+addSignal -h 15 $$top/dut/u_xbar/m03_axi_awvalid
+addSignal -h 15 $$top/dut/u_xbar/m03_axi_awready
+addSignal -h 15-HEX $$top/dut/u_xbar/m03_axi_awaddr
+addSignal -h 15 $$top/dut/u_xbar/m03_axi_wvalid
+addSignal -h 15 $$top/dut/u_xbar/m03_axi_wready
+addSignal -h 15-HEX $$top/dut/u_xbar/m03_axi_wdata
+addSignal -h 15 $$top/dut/u_xbar/m03_axi_wstrb
+addSignal -h 15 $$top/dut/u_xbar/m03_axi_bvalid
+addSignal -h 15 $$top/dut/u_xbar/m03_axi_bready
+addSignal -h 15 $$top/dut/u_xbar/m03_axi_bresp
+addSignal -h 15 $$top/dut/u_xbar/m03_axi_arvalid
+addSignal -h 15 $$top/dut/u_xbar/m03_axi_arready
+addSignal -h 15-HEX $$top/dut/u_xbar/m03_axi_araddr
+addSignal -h 15 $$top/dut/u_xbar/m03_axi_rvalid
+addSignal -h 15 $$top/dut/u_xbar/m03_axi_rready
+addSignal -h 15-HEX $$top/dut/u_xbar/m03_axi_rdata
+addSignal -h 15 $$top/dut/u_xbar/m03_axi_rresp
+addSignal -h 15 $$top/dut/u_xbar/m03_axi_rlast

@@ -56,3 +56,27 @@ check.
 
 Run: `make sw IP=<ip>`. Debug: `+ADP_DEBUG` (adapter trace),
 `make verdi LEVEL=sw IP=<ip>`.
+
+## Wave views (`waves/sw_<ip>.rc`)
+
+`make verdi LEVEL=sw IP=<ip>` recompiles with FSDB + kdb, re-sims, and
+opens Verdi with `waves/sw_<ip>.rc` preloaded (`-sswr`; restore also
+works via File → Restore Signal). Each file groups:
+
+1. `clk_rst` — TB clock/reset.
+2. `ifu_axi_64b` / `lsu_axi_64b` — VeeR 64-bit AXI channels at the
+   `el2_veer_wrapper` pins; `sb_axi_quiet` — side-channel valids only
+   (expected idle).
+3. `adapter_soc32` — `u_adapter/state` plus the 32-bit master side
+   (`m_*`); watch the 64→32 sub-beat splits here.
+4. `trace_ebreak` — retire trace (`tr_valid/tr_insn/tr_exc/tr_cause`)
+   and `saw_ebreak`.
+5. `uart_m01` / `timer_m02` / `gpio_m03` — per-test peripheral group:
+   TB monitors + wrapper-internal registers (`u_gpio/out_reg`,
+   `u_timer/count` …) + the xbar master port (`dut/u_xbar/m0X_axi_*`)
+   for that peripheral. The SoC-internal `m_axi_*[k]` fabric nets are
+   alias-collapsed in the FSDB, so the wrapper ports are used instead.
+
+All signal paths in the `.rc` files were round-trip validated (nWave
+restore → save, zero missing) against the `tb_soc_sw` FSDB.
+

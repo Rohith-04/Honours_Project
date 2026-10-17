@@ -55,4 +55,109 @@ package soc_pkg;
 
   localparam int unsigned GPIO_WIDTH = 8; // pins; registers carry them in low bits
 
+  // ===========================================================================
+  // Phase 2: Custom IP (NDA / HPM / WDT) — bases, offsets, build config
+  //
+  // The three CSR regions live in the 0x5000_xxxx range.
+  // All offsets are byte addresses relative to the base.
+  // ===========================================================================
+
+  // --- Build configuration (feeds wrapper generator + generated C header) ---
+  localparam bit          ENABLE_HPM  = 1'b1; // 0 removes the HPM and its xbar port
+  localparam int unsigned NUM_MASTERS = 2;    // M0=CPU, M1=NDA
+  localparam int unsigned NUM_SLAVES  = 6 + (ENABLE_HPM ? 1 : 0); // HPM is always last
+
+  // --- Custom IP base addresses -----------------------------------------------
+  localparam logic [31:0] NDA_BASE = 32'h5000_0000;
+  localparam logic [31:0] HPM_BASE = 32'h5000_1000;
+  localparam logic [31:0] WDT_BASE = 32'h5000_2000;
+
+  // Each CSR region is 4 KiB (12-bit address width).
+  localparam int unsigned CSR_REGION_BITS = 12; // 4 KiB per CSR block
+
+  // --- NDA data window (currently the RAM region) -----------------------------
+  localparam logic [31:0] NDA_DATA_BASE = RAM_BASE;
+  localparam logic [31:0] NDA_DATA_END  = RAM_BASE + RAM_BYTES;
+
+  // --- NDA register offsets (byte addresses from NDA_BASE) ---------------------
+  localparam logic [31:0] NDA_CTRL      = 32'h00;
+  localparam logic [31:0] NDA_STATUS    = 32'h04;
+  localparam logic [31:0] NDA_OP        = 32'h08;
+  localparam logic [31:0] NDA_SRC_BASE  = 32'h0C;
+  localparam logic [31:0] NDA_LEN       = 32'h10;
+  localparam logic [31:0] NDA_RESULT_LO = 32'h14;
+  localparam logic [31:0] NDA_RESULT_HI = 32'h18;
+  localparam logic [31:0] NDA_CYCLES    = 32'h1C;
+
+  // NDA_CTRL bits
+  localparam int unsigned NDA_CTRL_START  = 0; // self-clearing
+  localparam int unsigned NDA_CTRL_ABORT  = 1; // self-clearing
+  localparam int unsigned NDA_CTRL_IRQ_EN = 2;
+
+  // NDA_STATUS bits
+  localparam int unsigned NDA_STATUS_BUSY     = 0; // RO
+  localparam int unsigned NDA_STATUS_DONE     = 1; // W1C
+  localparam int unsigned NDA_STATUS_ERR      = 2; // W1C
+  localparam int unsigned NDA_STATUS_CODE_LSB = 4; // [7:4] RO error code
+
+  // NDA_OP encodings
+  localparam logic [3:0] NDA_OP_SUM    = 4'd0;
+  localparam logic [3:0] NDA_OP_MIN    = 4'd1;
+  localparam logic [3:0] NDA_OP_MAX    = 4'd2;
+  localparam logic [3:0] NDA_OP_ARGMAX = 4'd3;
+
+  // NDA error codes
+  localparam logic [3:0] NDA_ERR_NONE       = 4'h0;
+  localparam logic [3:0] NDA_ERR_BAD_LEN    = 4'h1;
+  localparam logic [3:0] NDA_ERR_BAD_OP     = 4'h2;
+  localparam logic [3:0] NDA_ERR_MISALIGNED = 4'h3;
+  localparam logic [3:0] NDA_ERR_BAD_ADDR   = 4'h4;
+  localparam logic [3:0] NDA_ERR_BAD_RANGE  = 4'h5;
+  localparam logic [3:0] NDA_ERR_BUS_ERROR  = 4'h6;
+  localparam logic [3:0] NDA_ERR_ABORTED    = 4'h7;
+
+  // --- NDA parameters (module-level, swept in experiments) --------------------
+  localparam int unsigned NDA_BURST_LEN       = 16;  // beats per read burst
+  localparam int unsigned NDA_MAX_OUTSTANDING = 4;   // reads in flight
+
+  // --- WDT register offsets (byte addresses from WDT_BASE) --------------------
+  localparam logic [31:0] WDT_CTRL       = 32'h00;
+  localparam logic [31:0] WDT_TIMEOUT    = 32'h04;
+  localparam logic [31:0] WDT_STATUS     = 32'h08;
+  localparam logic [31:0] WDT_TRIP_COUNT = 32'h0C;
+
+  // WDT_CTRL bits
+  localparam int unsigned WDT_CTRL_EN     = 0;
+  localparam int unsigned WDT_CTRL_IRQ_EN = 2;
+
+  // WDT_STATUS bits
+  localparam int unsigned WDT_STATUS_TRIPPED = 0; // W1C
+  localparam int unsigned WDT_STATUS_ARMED   = 1; // RO
+
+  // WDT default timeout
+  localparam int unsigned WDT_TIMEOUT_DEFAULT = 4096;
+
+  // --- HPM register offsets (byte addresses from HPM_BASE) --------------------
+  localparam logic [31:0] HPM_CTRL = 32'h00;
+
+  // HPM_CTRL bits
+  localparam int unsigned HPM_CTRL_ENABLE   = 0;
+  localparam int unsigned HPM_CTRL_CLEAR    = 1;  // self-clearing
+  localparam int unsigned HPM_CTRL_SNAPSHOT = 2;  // self-clearing
+
+  // HPM counter register pairs (LO at offset, HI at offset+4)
+  localparam logic [31:0] HPM_CYCLES_LO     = 32'h10;
+  localparam logic [31:0] HPM_CPU_AR_LO     = 32'h18;
+  localparam logic [31:0] HPM_CPU_AW_LO     = 32'h20;
+  localparam logic [31:0] HPM_CPU_RBEATS_LO = 32'h28;
+  localparam logic [31:0] HPM_CPU_WBEATS_LO = 32'h30;
+  localparam logic [31:0] HPM_NDA_AR_LO     = 32'h38;
+  localparam logic [31:0] HPM_NDA_RBEATS_LO = 32'h40;
+  localparam logic [31:0] HPM_NDA_BUSY_LO   = 32'h48;
+  localparam logic [31:0] HPM_FALLBACKS_LO  = 32'h50;
+  // each counter's HI word is at LO + 4
+
+  // HPM number of counters (for array sizing in RTL)
+  localparam int unsigned HPM_NUM_COUNTERS = 9;
+
 endpackage

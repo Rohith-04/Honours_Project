@@ -108,16 +108,21 @@ addSignal -h 15 $$top/dut/u_timer/match
 addSignal -h 15 -HEX $$top/dut/u_timer/count
 addSignal -h 15 -HEX $$top/dut/u_timer/compare
 addSignal -h 15 $$top/dut/u_timer/irq_o
-addSignal -h 15 $$top/dut/m_axi_awvalid[2]
-addSignal -h 15 $$top/dut/m_axi_awready[2]
-addSignal -h 15 $$top/dut/m_axi_wvalid[2]
-addSignal -h 15 $$top/dut/m_axi_wready[2]
-addSignal -h 15 $$top/dut/m_axi_bvalid[2]
-addSignal -h 15 $$top/dut/m_axi_bready[2]
-addSignal -h 15 $$top/dut/m_axi_bresp[2]
-addSignal -h 15 $$top/dut/m_axi_arvalid[2]
-addSignal -h 15 $$top/dut/m_axi_arready[2]
-addSignal -h 15 $$top/dut/m_axi_rvalid[2]
-addSignal -h 15 $$top/dut/m_axi_rready[2]
-addSignal -h 15 -HEX $$top/dut/m_axi_rdata[2]
-addSignal -h 15 $$top/dut/m_axi_rresp[2]
+addSignal -h 15 $$top/dut/u_xbar/m02_axi_awvalid
+addSignal -h 15 $$top/dut/u_xbar/m02_axi_awready
+addSignal -h 15-HEX $$top/dut/u_xbar/m02_axi_awaddr
+addSignal -h 15 $$top/dut/u_xbar/m02_axi_wvalid
+addSignal -h 15 $$top/dut/u_xbar/m02_axi_wready
+addSignal -h 15-HEX $$top/dut/u_xbar/m02_axi_wdata
+addSignal -h 15 $$top/dut/u_xbar/m02_axi_wstrb
+addSignal -h 15 $$top/dut/u_xbar/m02_axi_bvalid
+addSignal -h 15 $$top/dut/u_xbar/m02_axi_bready
+addSignal -h 15 $$top/dut/u_xbar/m02_axi_bresp
+addSignal -h 15 $$top/dut/u_xbar/m02_axi_arvalid
+addSignal -h 15 $$top/dut/u_xbar/m02_axi_arready
+addSignal -h 15-HEX $$top/dut/u_xbar/m02_axi_araddr
+addSignal -h 15 $$top/dut/u_xbar/m02_axi_rvalid
+addSignal -h 15 $$top/dut/u_xbar/m02_axi_rready
+addSignal -h 15-HEX $$top/dut/u_xbar/m02_axi_rdata
+addSignal -h 15 $$top/dut/u_xbar/m02_axi_rresp
+addSignal -h 15 $$top/dut/u_xbar/m02_axi_rlast

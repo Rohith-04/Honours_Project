@@ -44,6 +44,7 @@ VCS_FLAGS := \
 VCS_FLAGS_VERDI := \
     $(VCS_FLAGS) \
     -debug_access+all \
+    -kdb \
     +define+FSDB_DUMP \
     -P $(FSDB_PLI)/novas.tab \
     $(FSDB_PLI)/pli.a
@@ -64,7 +65,9 @@ XBAR := \
     $(PROJ_ROOT)/rtl/interconnect/priority_encoder.v \
     $(PROJ_ROOT)/rtl/interconnect/arbiter.v \
     $(PROJ_ROOT)/rtl/interconnect/axi_interconnect.v \
-    $(PROJ_ROOT)/rtl/interconnect/axi_interconnect_wrap_1x4.v
+    $(PROJ_ROOT)/rtl/interconnect/axi_interconnect_wrap_1x4.v \
+    $(PROJ_ROOT)/rtl/interconnect/axi_interconnect_wrap_2x7.v \
+    $(PROJ_ROOT)/rtl/interconnect/axi_interconnect_wrap_2x6.v
 
 SOC := \
     $(PROJ_ROOT)/rtl/soc/soc_pkg.sv \
@@ -72,6 +75,9 @@ SOC := \
     $(PROJ_ROOT)/rtl/wrappers/uart_wrapper.sv \
     $(PROJ_ROOT)/rtl/wrappers/timer_wrapper.sv \
     $(PROJ_ROOT)/rtl/wrappers/gpio_wrapper.sv \
+    $(PROJ_ROOT)/rtl/wrappers/nda_wrapper.sv \
+    $(PROJ_ROOT)/rtl/wrappers/wdt_wrapper.sv \
+    $(PROJ_ROOT)/rtl/wrappers/hpm_wrapper.sv \
     $(PROJ_ROOT)/rtl/soc/honours_soc.sv
 
 BFM_TB := \
@@ -98,6 +104,22 @@ ram_UNIT := $(PROJ_ROOT)/rtl/soc/soc_pkg.sv \
             $(PROJ_ROOT)/rtl/mem/axi_ram.sv \
             $(BFM_TB) $(PROJ_ROOT)/tb/unit/tb_ram_unit.sv
 ram_TOP  := tb_ram_unit
+
+nda_UNIT := $(PROJ_ROOT)/rtl/soc/soc_pkg.sv \
+            $(PROJ_ROOT)/rtl/mem/axi_ram.sv \
+            $(PROJ_ROOT)/rtl/wrappers/nda_wrapper.sv \
+            $(BFM_TB) $(PROJ_ROOT)/tb/unit/tb_nda_unit.sv
+nda_TOP  := tb_nda_unit
+
+wdt_UNIT := $(PROJ_ROOT)/rtl/soc/soc_pkg.sv \
+            $(PROJ_ROOT)/rtl/wrappers/wdt_wrapper.sv \
+            $(BFM_TB) $(PROJ_ROOT)/tb/unit/tb_wdt_unit.sv
+wdt_TOP  := tb_wdt_unit
+
+hpm_UNIT := $(PROJ_ROOT)/rtl/soc/soc_pkg.sv \
+            $(PROJ_ROOT)/rtl/wrappers/hpm_wrapper.sv \
+            $(BFM_TB) $(PROJ_ROOT)/tb/unit/tb_hpm_unit.sv
+hpm_TOP  := tb_hpm_unit
 
 integration_FILES := $(SOC) $(UART_IP) $(XBAR) $(BFM_TB) \
                      $(PROJ_ROOT)/tb/integration/tb_soc_integration.sv
@@ -168,8 +190,8 @@ sw: $(VEER_BUILD)/common_defines.vh $(VEER_FLIST)
 # --- unit -----------------------------------------------------------------------
 .PHONY: unit
 unit:
-	@if [ -z "$(IP)" ]; then echo "usage: make unit IP=gpio|timer|uart|ram"; exit 1; fi
-	@if [ -z "$($(IP)_TOP)" ]; then echo "unknown IP '$(IP)' (gpio|timer|uart|ram)"; exit 1; fi
+	@if [ -z "$(IP)" ]; then echo "usage: make unit IP=gpio|timer|uart|ram|nda|wdt|hpm"; exit 1; fi
+	@if [ -z "$($(IP)_TOP)" ]; then echo "unknown IP '$(IP)' (gpio|timer|uart|ram|nda|wdt|hpm)"; exit 1; fi
 	@mkdir -p $(PROJ_ROOT)/run/unit_$(IP)
 	@echo "[make] compiling unit $(IP)..."
 	$(VCS) $(VCS_FLAGS) $(DEFINES) $(INCDIRS) \
@@ -198,9 +220,9 @@ integration:
 # inside a recipe). $($(IP)_UNIT)/$($(IP)_TOP) still expand at parse time.
 .PHONY: verdi
 verdi:
-	@if [ -z "$(LEVEL)" ]; then echo "usage: make verdi LEVEL=unit IP=gpio|timer|uart|ram | LEVEL=integration | LEVEL=sw IP=gpio|uart|timer"; exit 1; fi
+	@if [ -z "$(LEVEL)" ]; then echo "usage: make verdi LEVEL=unit IP=gpio|timer|uart|ram|nda|wdt|hpm | LEVEL=integration | LEVEL=sw IP=gpio|uart|timer"; exit 1; fi
 	@if [ "$(LEVEL)" = "unit" ]; then \
-	    if [ -z "$(IP)" -o -z "$($(IP)_TOP)" ]; then echo "unit needs IP=gpio|timer|uart|ram"; exit 1; fi; \
+	    if [ -z "$(IP)" -o -z "$($(IP)_TOP)" ]; then echo "unit needs IP=gpio|timer|uart|ram|nda|wdt|hpm"; exit 1; fi; \
 	    mkdir -p $(PROJ_ROOT)/run/unit_$(IP); \
 	    echo "[make] compiling unit $(IP) with FSDB..."; \
 	$(VCS) $(VCS_FLAGS_VERDI) $(DEFINES) $(INCDIRS) \
