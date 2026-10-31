@@ -35,6 +35,10 @@ fi
 # Matches the VeeR tools flow for older GCC (rv32imc, ilp32).
 MARCH="${MARCH:-rv32imc_zicsr_zifencei}"
 MABI="${MABI:-ilp32}"
+case "${HAVE_HPM:-1}" in
+    0|1) ;;
+    *) echo "HAVE_HPM must be 0 or 1" >&2; exit 1 ;;
+esac
 
 mkdir -p "$OUT_DIR"
 
@@ -52,6 +56,7 @@ done
 
 echo "[build_sw] test=$(basename "$TEST_DIR") march=$MARCH abi=$MABI"
 "$CC" -march="$MARCH" -mabi="$MABI" \
+    -DHAVE_HPM="${HAVE_HPM:-1}" \
     -ffreestanding -nostartfiles -nostdlib -fno-builtin \
     -O1 -g \
     -I"$COMMON" \

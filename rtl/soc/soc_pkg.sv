@@ -15,6 +15,12 @@ package soc_pkg;
   localparam int unsigned AXI_DATA_WIDTH = 32;
   localparam int unsigned AXI_ADDR_WIDTH = 32;
   localparam int unsigned AXI_ID_WIDTH   = 12;
+  // VeeR default core-local PIC and the SoC's external interrupt source IDs.
+  localparam logic [31:0] PIC_BASE = 32'hF00C_0000;
+  localparam int unsigned IRQ_UART = 1;
+  localparam int unsigned IRQ_TIMER = 2;
+  localparam int unsigned IRQ_NDA = 3;
+  localparam int unsigned IRQ_WDT = 4;
 
   // --- Slave base addresses / sizes -----------------------------------------
   localparam logic [31:0] RAM_BASE   = 32'h0000_0000;
@@ -63,7 +69,11 @@ package soc_pkg;
   // ===========================================================================
 
   // --- Build configuration (feeds wrapper generator + generated C header) ---
-  localparam bit          ENABLE_HPM  = 1'b1; // 0 removes the HPM and its xbar port
+`ifdef SOC_DISABLE_HPM
+  localparam bit          ENABLE_HPM  = 1'b0;
+`else
+  localparam bit          ENABLE_HPM  = 1'b1;
+`endif
   localparam int unsigned NUM_MASTERS = 2;    // M0=CPU, M1=NDA
   localparam int unsigned NUM_SLAVES  = 6 + (ENABLE_HPM ? 1 : 0); // HPM is always last
 

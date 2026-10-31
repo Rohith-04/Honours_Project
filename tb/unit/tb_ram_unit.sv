@@ -30,7 +30,7 @@ module tb_ram_unit;
   initial begin
     repeat (500_000) @(posedge clk);
     $display("TEST tb_ram_unit: FAIL (global timeout)");
-    $finish;
+    $fatal(1, "Global simulation timeout");
   end
 
   axi_master_bfm bfm_if (.clk(clk), .aresetn(aresetn));

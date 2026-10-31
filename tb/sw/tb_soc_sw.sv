@@ -46,7 +46,11 @@ module tb_soc_sw;
   initial begin
     repeat (5_000_000) @(posedge clk);
     $display("TEST sw: FAIL (global timeout)");
-    $finish;
+    $display("TIMEOUT PC=%h lsu AR=%h AW=%h adapter=%0d NDA fsm=%0d outstanding=%0d status=%h irq=%b/%b",
+      tr_pc, lsu_araddr, lsu_awaddr,
+      u_adapter.state, dut.u_nda.fsm, dut.u_nda.outstanding,
+      dut.u_nda.err_code_reg, nda_irq_mon, wdt_irq_mon);
+    $fatal(1, "Global simulation timeout");
   end
 
   // --- Test selection -------------------------------------------------------
@@ -57,6 +61,9 @@ module tb_soc_sw;
     if (sw_test == "gpio") tag_ok = "GPIO OK";
     else if (sw_test == "uart") tag_ok = "UART OK";
     else if (sw_test == "timer") tag_ok = "TIMER OK";
+    else if (sw_test == "nda") tag_ok = "NDA OK";
+    else if (sw_test == "hpm") tag_ok = "HPM OK";
+    else if (sw_test == "wdt") tag_ok = "WDT OK";
     else tag_ok = "UNKNOWN";
     $display("[tb_soc_sw] SW_TEST=%s expect_tag=\"%s\"", sw_test, tag_ok);
   end
@@ -124,6 +131,13 @@ module tb_soc_sw;
   wire uart_tx_mon;
   wire uart_irq_mon;
   wire timer_irq_mon;
+  wire nda_irq_mon, wdt_irq_mon;
+  logic saw_nda_irq = 0, saw_wdt_irq = 0;
+  int irq_debug_count = 0;
+  always @(posedge clk) begin
+    if (nda_irq_mon) saw_nda_irq <= 1;
+    if (wdt_irq_mon) saw_wdt_irq <= 1;
+  end
   wire [soc_pkg::GPIO_WIDTH-1:0] gpio_out_mon;
   logic saw_timer_irq = 1'b0;
   always @(posedge clk) if (timer_irq_mon) saw_timer_irq <= 1'b1;
@@ -133,7 +147,29 @@ module tb_soc_sw;
   // may already have moved past the ebreak when the exception valid fires.
   wire [31:0] tr_insn;
   wire tr_valid, tr_exc;
+  wire [31:0] tr_pc;
   wire [4:0] tr_cause;
+  wire [31:1] pic_irqs;
+  assign pic_irqs = (31'(uart_irq_mon) << (IRQ_UART-1)) |
+                    (31'(timer_irq_mon) << (IRQ_TIMER-1)) |
+                    (31'(nda_irq_mon) << (IRQ_NDA-1)) |
+                    (31'(wdt_irq_mon) << (IRQ_WDT-1));
+  initial assert (`RV_PIC_BASE_ADDR == soc_pkg::PIC_BASE)
+    else $fatal(1, "Generated VeeR PIC base disagrees with soc_pkg");
+  always @(posedge clk) begin
+    if ($test$plusargs("IRQ_DEBUG") && (nda_irq_mon || wdt_irq_mon) &&
+        irq_debug_count < 50 && tr_valid) begin
+      irq_debug_count++;
+      $display("IRQ_TRACE PC=%h insn=%h exc=%b cause=%h", tr_pc, tr_insn, tr_exc, tr_cause);
+    end
+  end
+  always @(posedge nda_irq_mon or posedge wdt_irq_mon) begin
+    if ($test$plusargs("IRQ_DEBUG"))
+      $display("IRQ_STATE pc=%h claim=%h priority=%h threshold=%h current=%h enables=%h",
+        tr_pc, veer.veer.pic_claimid, veer.veer.pic_pl,
+        veer.veer.dec_tlu_meipt, veer.veer.dec_tlu_meicurpl,
+        veer.veer.pic_ctrl_inst.intenable_reg);
+  end
 
   el2_mem_if mem_export ();
   el2_mem_if icache_export ();
@@ -147,7 +183,7 @@ module tb_soc_sw;
     .nmi_vec        (31'b0),
     .jtag_id        ({4'b0001, 16'b0, 11'h045}),
     .trace_rv_i_insn_ip      (tr_insn),
-    .trace_rv_i_address_ip   (),
+    .trace_rv_i_address_ip   (tr_pc),
     .trace_rv_i_valid_ip     (tr_valid),
     .trace_rv_i_exception_ip (tr_exc),
     .trace_rv_i_ecause_ip    (tr_cause),
@@ -234,7 +270,8 @@ module tb_soc_sw;
     .dccm_ecc_single_error (), .dccm_ecc_double_error (),
     .dccm_write_readback_error (),
     .el2_icache_export (icache_export.veer_icache_src),
-    .timer_int (1'b0), .soft_int (1'b0), .extintsrc_req ('0),
+    .timer_int (1'b0), .soft_int (1'b0),
+    .extintsrc_req (pic_irqs),
     .dec_tlu_perfcnt0 (), .dec_tlu_perfcnt1 (),
     .dec_tlu_perfcnt2 (), .dec_tlu_perfcnt3 (),
     .jtag_tck (1'b0), .jtag_tms (1'b0), .jtag_tdi (1'b0),
@@ -356,8 +393,34 @@ module tb_soc_sw;
     .s_axi_rvalid (s_rvalid), .s_axi_rready (s_rready),
     .uart_rx_i (1'b1), .uart_tx_o (uart_tx_mon), .uart_irq_o (uart_irq_mon),
     .timer_irq_o (timer_irq_mon),
+    .nda_irq_o (nda_irq_mon), .wdt_irq_o (wdt_irq_mon),
     .gpio_in (8'hA5), .gpio_out (gpio_out_mon)
   );
+
+  // EXTERNAL WDT scenario: pause RAM R handshakes once, then release.
+  // Force the receiver READY register, preserving the RAM's held VALID/data.
+  // This is backpressure, not cancellation of an accepted AXI request.
+  generate
+    if (soc_pkg::ENABLE_HPM) begin : gen_fault_7
+      initial begin
+        wait (sw_test == "wdt" && aresetn);
+        wait (dut.nda_arvalid && dut.nda_arready);
+        @(negedge clk);
+        force dut.gen_xbar_2x7.u_xbar.axi_interconnect_inst.m_axi_rready_reg = '0;
+        repeat (512) @(negedge clk);
+        release dut.gen_xbar_2x7.u_xbar.axi_interconnect_inst.m_axi_rready_reg;
+      end
+    end else begin : gen_fault_6
+      initial begin
+        wait (sw_test == "wdt" && aresetn);
+        wait (dut.nda_arvalid && dut.nda_arready);
+        @(negedge clk);
+        force dut.gen_xbar_2x6.u_xbar.axi_interconnect_inst.m_axi_rready_reg = '0;
+        repeat (512) @(negedge clk);
+        release dut.gen_xbar_2x6.u_xbar.axi_interconnect_inst.m_axi_rready_reg;
+      end
+    end
+  endgenerate
 
   // --- UART console monitor (TX @ div=100 -> 1010 ns/bit) --------------------
   localparam real TBIT_NS = 1010.0;
@@ -439,6 +502,8 @@ module tb_soc_sw;
     check_equal("sw_signature", 32'h50515353, sig);
     if (sw_test == "timer")
       check_equal("sw_timer_irq", 32'h1, {31'b0, saw_timer_irq});
+    if (sw_test == "nda") check_equal("sw_nda_irq", 1, saw_nda_irq);
+    if (sw_test == "wdt") check_equal("sw_wdt_irq", 1, saw_wdt_irq);
     report_results({"sw_", sw_test});
   end
 

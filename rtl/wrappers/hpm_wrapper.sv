@@ -44,6 +44,7 @@ module hpm_wrapper #(
   output logic [ID_WIDTH-1:0]  s_axi_rid,
   output logic [31:0]          s_axi_rdata,
   output logic [1:0]           s_axi_rresp,
+  output wire                  s_axi_rlast,
   output logic                 s_axi_rvalid,
   input  wire                  s_axi_rready,
 
@@ -100,6 +101,7 @@ module hpm_wrapper #(
   logic [ID_WIDTH-1:0]   w_id;
   logic [ADDR_WIDTH-1:0] w_addr;
   logic                  w_is_burst;
+  logic [7:0]            w_left;
 
   assign s_axi_awready = (wstate == W_IDLE);
   assign s_axi_wready  = (wstate == W_DATA);
@@ -122,6 +124,7 @@ module hpm_wrapper #(
       w_id         <= '0;
       w_addr       <= '0;
       w_is_burst   <= 1'b0;
+      w_left       <= 0;
       s_axi_bvalid <= 1'b0;
       s_axi_bresp  <= 2'b00;
       s_axi_bid    <= '0;
@@ -131,16 +134,20 @@ module hpm_wrapper #(
           if (s_axi_awvalid) begin
             w_id       <= s_axi_awid;
             w_addr     <= s_axi_awaddr;
-            w_is_burst <= (s_axi_awlen != 8'd0);
+            w_is_burst <= (s_axi_awlen != 0 || s_axi_awsize != 2 || s_axi_awburst != 1);
+            w_left <= s_axi_awlen;
             wstate     <= W_DATA;
           end
         end
         W_DATA: begin
           if (s_axi_wvalid) begin
-            s_axi_bid    <= w_id;
-            s_axi_bresp  <= w_ok ? 2'b00 : 2'b10;
-            s_axi_bvalid <= 1'b1;
-            wstate       <= W_RESP;
+            if (w_left != 0) w_left <= w_left - 1'b1;
+            else begin
+              s_axi_bid    <= w_id;
+              s_axi_bresp  <= w_ok ? 2'b00 : 2'b10;
+              s_axi_bvalid <= 1'b1;
+              wstate       <= W_RESP;
+            end
           end
         end
         W_RESP: begin
@@ -207,6 +214,8 @@ module hpm_wrapper #(
   // ===========================================================================
   typedef enum logic [1:0] {R_IDLE, R_RESP} rstate_t;
   rstate_t rstate;
+  logic [7:0] r_left;
+  assign s_axi_rlast = (r_left == 0);
 
   logic [ID_WIDTH-1:0]   r_id;
   logic [ADDR_WIDTH-1:0] r_addr;
@@ -239,7 +248,7 @@ module hpm_wrapper #(
   always_comb begin
     r_rdata_comb = 32'h0;
     r_rresp_comb = 2'b00;
-    if (s_axi_arlen != 8'd0) begin
+    if (s_axi_arlen != 0 || s_axi_arsize != 2 || s_axi_arburst != 1 || ar_off[1:0] != 0) begin
       r_rresp_comb = 2'b10;
     end else begin
       if (ar_off == 12'h000) begin
@@ -262,6 +271,7 @@ module hpm_wrapper #(
   always_ff @(posedge clk or negedge aresetn) begin
     if (!aresetn) begin
       rstate       <= R_IDLE;
+      r_left       <= 0;
       r_id         <= '0;
       r_addr       <= '0;
       r_is_burst   <= 1'b0;
@@ -273,6 +283,7 @@ module hpm_wrapper #(
       case (rstate)
         R_IDLE: begin
           if (s_axi_arvalid) begin
+            r_left <= s_axi_arlen;
             r_id       <= s_axi_arid;
             r_addr     <= s_axi_araddr;
             r_is_burst <= (s_axi_arlen != 8'd0);
@@ -285,8 +296,11 @@ module hpm_wrapper #(
         end
         R_RESP: begin
           if (s_axi_rready) begin
-            s_axi_rvalid <= 1'b0;
-            rstate       <= R_IDLE;
+            if (r_left != 0) r_left <= r_left - 1'b1;
+            else begin
+              s_axi_rvalid <= 1'b0;
+              rstate       <= R_IDLE;
+            end
           end
         end
         default: rstate <= R_IDLE;

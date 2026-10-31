@@ -33,9 +33,13 @@ SECTIONS
     } > RAM
 
     .bss (NOLOAD) : {
+        . = ALIGN(4);
+        __bss_start = .;
         *(.bss*)
         *(.sbss*)
         *(COMMON)
+        . = ALIGN(4);
+        __bss_end = .;
     } > RAM
 
     /* Pinned result word for the TB signature check. */
@@ -44,4 +48,5 @@ SECTIONS
     } > RAM
 
     PROVIDE(_stack_top = ORIGIN(RAM) + LENGTH(RAM));
+    ASSERT(__bss_end <= 0x00007FF0, "Program/data overlaps the result signature")
 }

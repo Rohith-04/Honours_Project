@@ -111,14 +111,11 @@ module honours_soc
   wire                  m_axi_rvalid [0:6];
   wire                  m_axi_rready [0:6];
 
-  // Single-beat slaves (UART, Timer, GPIO, NDA CSR, WDT CSR, HPM CSR) have
-  // no RLAST port — tie high so the interconnect retires reads on first beat.
+  // Legacy single-beat peripherals have no RLAST port. Phase 2 CSR blocks
+  // drive RLAST themselves, including multi-beat error responses.
   assign m_axi_rlast[1] = 1'b1; // UART
   assign m_axi_rlast[2] = 1'b1; // Timer
   assign m_axi_rlast[3] = 1'b1; // GPIO
-  assign m_axi_rlast[4] = 1'b1; // NDA CSR
-  assign m_axi_rlast[5] = 1'b1; // WDT CSR
-  assign m_axi_rlast[6] = 1'b1; // HPM CSR
 
   // ===========================================================================
   // NDA AXI read master → interconnect s01
@@ -1025,6 +1022,7 @@ module honours_soc
     .s_axi_rid     (m_axi_rid[4]),
     .s_axi_rdata   (m_axi_rdata[4]),
     .s_axi_rresp   (m_axi_rresp[4]),
+    .s_axi_rlast   (m_axi_rlast[4]),
     .s_axi_rvalid  (m_axi_rvalid[4]),
     .s_axi_rready  (m_axi_rready[4]),
 
@@ -1084,6 +1082,7 @@ module honours_soc
     .s_axi_rid     (m_axi_rid[5]),
     .s_axi_rdata   (m_axi_rdata[5]),
     .s_axi_rresp   (m_axi_rresp[5]),
+    .s_axi_rlast   (m_axi_rlast[5]),
     .s_axi_rvalid  (m_axi_rvalid[5]),
     .s_axi_rready  (m_axi_rready[5]),
 
@@ -1131,6 +1130,7 @@ module honours_soc
         .s_axi_rid     (m_axi_rid[6]),
         .s_axi_rdata   (m_axi_rdata[6]),
         .s_axi_rresp   (m_axi_rresp[6]),
+        .s_axi_rlast   (m_axi_rlast[6]),
         .s_axi_rvalid  (m_axi_rvalid[6]),
         .s_axi_rready  (m_axi_rready[6]),
 

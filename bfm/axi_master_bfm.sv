@@ -63,7 +63,7 @@ interface axi_master_bfm #(
 
   task automatic timeout_finish(input string where);
     $display("[BFM TIMEOUT] no handshake on %s within %0d cycles — FAIL", where, TIMEOUT);
-    $finish;
+    $fatal(1, "AXI BFM timeout");
   endtask
 
   // Idle the master outputs. Call once after reset, before any transfer.
@@ -163,7 +163,7 @@ interface axi_master_bfm #(
   );
     int t, i, n;
     n = data.size();
-    if (n < 1) begin
+    if (n < 1 || n > 256) begin
       resp = 2'b10;
       return;
     end
@@ -238,7 +238,7 @@ interface axi_master_bfm #(
     int t, i, n;
     n = data.size();
     resp = 2'b00;
-    if (n < 1) begin
+    if (n < 1 || n > 256) begin
       resp = 2'b10;
       return;
     end
@@ -265,6 +265,7 @@ interface axi_master_bfm #(
       t++;
       if (t > TIMEOUT) timeout_finish("R-burst");
       if (rvalid === 1'b1) begin
+        assert (rlast === (i == n - 1)) else $fatal(1, "Burst RLAST mismatch");
         data[i] = rdata;
         if (rresp !== 2'b00) resp = rresp;
         i++;
@@ -276,6 +277,75 @@ interface axi_master_bfm #(
       t++;
       if (t > TIMEOUT) timeout_finish("R-burst-idle");
     end
+  endtask
+
+  // Protocol-directed transaction: AW completes before delayed W; B stalls.
+  task automatic write_delayed(input logic [31:0] addr, data,
+                                input logic [ID_WIDTH-1:0] id,
+                                output logic [1:0] resp);
+    int t;
+    bready <= 0;
+    awid <= id; awaddr <= addr; awlen <= 0; awsize <= 2;
+    awburst <= 1; awvalid <= 1;
+    @(posedge clk);
+    t = 0;
+    while (!awready) begin
+      @(posedge clk);
+      if (t++ > TIMEOUT) timeout_finish("delayed-AW");
+    end
+    awvalid <= 0;
+    repeat (7) @(negedge clk);
+    wdata <= data; wstrb <= 15; wlast <= 1; wvalid <= 1;
+    @(posedge clk);
+    t = 0;
+    while (!wready) begin
+      @(posedge clk);
+      if (t++ > TIMEOUT) timeout_finish("delayed-W");
+    end
+    wvalid <= 0; wlast <= 0;
+    t = 0;
+    while (!bvalid) begin
+      @(negedge clk);
+      if (t++ > TIMEOUT) timeout_finish("stalled-B");
+    end
+    resp = bresp;
+    repeat (5) begin
+      @(negedge clk);
+      assert (bvalid && bid == id && bresp == resp)
+        else $fatal(1, "B response changed under backpressure");
+    end
+    bready <= 1;
+    @(posedge clk); @(negedge clk);
+  endtask
+
+  task automatic read_stalled(input logic [31:0] addr,
+                               input logic [ID_WIDTH-1:0] id,
+                               output logic [31:0] data,
+                               output logic [1:0] resp);
+    int t;
+    rready <= 0;
+    arid <= id; araddr <= addr; arlen <= 0; arsize <= 2;
+    arburst <= 1; arvalid <= 1;
+    @(posedge clk);
+    t = 0;
+    while (!arready) begin
+      @(posedge clk);
+      if (t++ > TIMEOUT) timeout_finish("stalled-AR");
+    end
+    arvalid <= 0;
+    t = 0;
+    while (!rvalid) begin
+      @(negedge clk);
+      if (t++ > TIMEOUT) timeout_finish("stalled-R");
+    end
+    data = rdata; resp = rresp;
+    repeat (5) begin
+      @(negedge clk);
+      assert (rvalid && rlast && rid == id && rdata == data && rresp == resp)
+        else $fatal(1, "R response changed under backpressure");
+    end
+    rready <= 1;
+    @(posedge clk); @(negedge clk);
   endtask
 
 endinterface

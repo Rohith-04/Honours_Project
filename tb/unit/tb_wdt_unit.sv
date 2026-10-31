@@ -36,7 +36,7 @@ module tb_wdt_unit;
   initial begin
     repeat (500_000) @(posedge clk);
     $display("TEST tb_wdt_unit: FAIL (global timeout)");
-    $finish;
+    $fatal(1, "Global simulation timeout");
   end
 
   axi_master_bfm bfm_if (.clk(clk), .aresetn(aresetn));
@@ -80,6 +80,7 @@ module tb_wdt_unit;
     .s_axi_rid     (bfm_if.rid),
     .s_axi_rdata   (bfm_if.rdata),
     .s_axi_rresp   (bfm_if.rresp),
+    .s_axi_rlast   (bfm_if.rlast),
     .s_axi_rvalid  (bfm_if.rvalid),
     .s_axi_rready  (bfm_if.rready),
 
@@ -207,6 +208,39 @@ module tb_wdt_unit;
     #1;
     check_equal("irq_drops", 32'h0, {31'b0, wdt_irq_w});
 
+    wdt_read(bfm_if, WDT_CTRL, rdata, resp);
+    check_equal("ctrl_irq_enable_readback", 5, rdata);
+    // Exact timeout: arm at busy rise, then trip on the fifth idle cycle.
+    wdt_write(bfm_if, WDT_TIMEOUT, 5, resp);
+    @(negedge clk); nda_busy_stim = 1;
+    @(posedge clk); #1;
+    repeat (4) begin
+      @(posedge clk); #1;
+      check_equal("no_early_trip", 0, wdt_trip_w);
+    end
+    @(posedge clk); #1;
+    check_equal("exact_timeout_pulse", 1, wdt_trip_w);
+    check_equal("abort_matches_trip", 1, wdt_abort_w);
+    @(posedge clk); #1;
+    check_equal("one_cycle_trip", 0, wdt_trip_w);
+    @(negedge clk); nda_busy_stim = 0;
+    wdt_write(bfm_if, WDT_STATUS, 1, resp);
+    wdt_write(bfm_if, WDT_TIMEOUT, 100, resp);
+    @(negedge clk); nda_busy_stim = 1;
+    repeat (3) @(negedge clk);
+    wdt_write(bfm_if, WDT_CTRL, 0, resp);
+    repeat (110) @(negedge clk);
+    wdt_read(bfm_if, WDT_STATUS, rdata, resp);
+    check_equal("disable_while_armed", 0, rdata);
+    nda_busy_stim = 0;
+    @(negedge clk);
+    wdt_write(bfm_if, WDT_CTRL, 1, resp);
+    @(negedge clk); nda_busy_stim = 1;
+    repeat (3) @(negedge clk);
+    wdt_write(bfm_if, WDT_TIMEOUT, 0, resp);
+    repeat (110) @(negedge clk);
+    wdt_read(bfm_if, WDT_STATUS, rdata, resp);
+    check_equal("timeout_zero_while_armed", 0, rdata);
     report_results("tb_wdt_unit");
   end
 

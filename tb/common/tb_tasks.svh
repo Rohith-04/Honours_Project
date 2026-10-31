@@ -47,6 +47,7 @@ task automatic report_results(input string test_name);
   end else begin
     $display("TEST %s: FAIL (%0d passed, %0d failed)",
              test_name, pass_count, fail_count);
+    $fatal(1, "Test checks failed");
   end
   $display("==============================================");
   $finish;

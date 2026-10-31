@@ -4,6 +4,13 @@ An Honours project extending a **VeeR EL2 RV32IMC RISC-V SoC** with a custom **N
 
 The project is a complete SoC rather than an isolated RTL block. It includes the processor, AXI4 interconnect, memory, peripherals, verification infrastructure, software tests, the NDA, Hardware Performance Monitor (HPM), and NDA watchdog (WDT).
 
+**Phase 2 directed correctness baseline (2026-10-31):** RTL fixes, unit and
+integration verification, and NDA/HPM/WDT software tests on VeeR are complete.
+Run `make phase2` and `make phase2 HPM=0`. See
+[the Phase 2 verification record](doc/verification/phase2.md) for coverage,
+software interrupts, HPM enable semantics, commands and recovery limits.
+Performance measurements and UVM are deferred.
+
 ## Project Overview
 
 The NDA performs simple data-intensive operations close to the memory interface, eliminating the need for the CPU to load and process every element. Software configures the NDA with an address range and operation; the NDA streams the array over its own AXI4 read port, reduces it, and reports completion via interrupt and status flag.
@@ -33,7 +40,7 @@ The main objective is to measure the actual crossover point where NDA execution 
 | **GPIO** | 8 bidirectional GPIO pins at `0x1002_0000` |
 | **64→32 AXI Adapter** | Converts the VeeR EL2 64-bit IFU/LSU interface to the 32-bit SoC fabric |
 
-### Phase 2: NDA, HPM, and WDT ✓ RTL and Unit Verification Complete
+### Phase 2: NDA, HPM, and WDT — Directed Baseline Through Software
 
 | Block | Base Address | Description |
 |---|---|---|
@@ -108,7 +115,8 @@ Compiled RISC-V C runs on the VeeR EL2 core through the full SoC path.
 
 ### Verification Results
 
-Results from **VCS U-2023.03-SP1**.
+Historical results are listed below. The current regression uses VCS
+**U-2023.03_Full64** and is documented in `doc/verification/phase2.md`.
 
 #### Phase 1 — as of 2026-09-26
 
@@ -193,12 +201,15 @@ make clean
 rm -rf csrc
 ```
 
-`csrc` contains shared incremental compilation state and should be removed when debugging stale build artifacts.
+The current flow gives each target its own compilation directory and explicit
+simulation top. The historical root `csrc` is not used by ordinary targets.
+Cleaning is unnecessary for the Phase 2 regression.
 
 ### Simulation Output
 
 ```text
-run/<target>/sim.log
+run/phase2/<target>/sim.log
+run/phase2_nohpm/<target>/sim.log
 ```
 
 ## Repository Structure
@@ -246,7 +257,11 @@ Honours_Project/
 - Reproducible ELF-to-hex software flow
 - Centralised SoC memory map in `soc_pkg.sv`
 
-### Phase 2 — RTL and Unit Verification Complete
+### Phase 2 — Directed Correctness Baseline Complete
+
+Current results: NDA unit 48 checks (49 with queued responder), WDT unit 29,
+HPM unit 24, integration 128 with HPM and 124 without. All six software tests
+pass in both configurations; the absent-HPM software variant skips its CSRs.
 
 - NDA reduction engine (`nda_wrapper.sv`) — SUM, MIN, MAX, ARGMAX, all error codes, burst address generation
 - NDA AXI4 read master interface — AR/R channels, constant ARID, configurable burst length and outstanding depth
@@ -259,25 +274,30 @@ Honours_Project/
 - `soc_pkg.sv` extended with all Phase 2 bases, offsets, and build configuration
 - Unit verification: NDA (33 checks), WDT (19 checks), HPM (21 checks)
 
+The counts above describe the original October 17 checkpoint. The October 31
+baseline expands those tests, adds a queued AXI responder, concurrent-master
+integration, HPM-disabled regressions, C drivers, PIC-serviced NDA/WDT IRQs,
+and temporary-stall watchdog fallback/restart. `scripts/check_sim.py` makes
+failure logs fail Make even when the simulator returns zero.
+
 ### What's Next
 
 The following items remain to complete the project:
 
-1. **Integration verification for Phase 2** — extend `tb/integration/tb_soc_integration.sv` to exercise NDA, WDT, and HPM through the 2×7 interconnect. Verify address decode, cross-talk, and round-robin arbitration between CPU and NDA traffic.
+1. **Performance crossover sweep** — after reviewing the verified baseline,
+   collect CPU/NDA cycles and bus events across array sizes and configurations.
+   No performance measurements have been collected in this implementation work.
 
-2. **Software driver for NDA** — write a C driver in `sw/common/` that configures the NDA over MMIO, polls or handles the IRQ, reads results, and fences appropriately. Verify `mrac` region 5 is set in `startup.S` (side-effect bit for `0x5000_xxxx`).
+2. **UVM and broader coverage** — deferred until the directed baseline review.
 
-3. **NDA software test** — `sw/nda_test/`: run the same array through both the NDA and a software loop, compare results via UART, confirm correctness before any performance measurement.
+3. **Permanent-fault recovery architecture** — if required, define isolation
+   and reset behavior for a slave that never returns outstanding responses.
 
-4. **Performance crossover sweep** — use `mcycle` and HPM counters to measure NDA CYCLES, CPU cycles, and AXI transactions across varying array sizes, `BURST_LEN`, and `MAX_OUTSTANDING`. Software is crossover-unaware; it runs both paths at every size and the crossover is read off the data.
+4. **HPM area comparison** — build the SoC with `ENABLE_HPM = 0` and compare the synthesis area report against the full build. Report the HPM wrapper area alone (hierarchical report) and the whole-SoC delta (includes the crossbar port).
 
-5. **WDT integration test** — inject a simulated bus stall (slave holds R off), confirm trip after `TIMEOUT`, NDA reports `ABORTED`, `TRIP_COUNT` increments, and the software fallback loop produces the correct result.
+5. **FPGA implementation** — port the SoC to the target FPGA, synthesise, and measure actual resource usage (LUTs, FFs, BRAM) and timing closure. Compare against the simulation-only memory models.
 
-6. **HPM area comparison** — build the SoC with `ENABLE_HPM = 0` and compare the synthesis area report against the full build. Report the HPM wrapper area alone (hierarchical report) and the whole-SoC delta (includes the crossbar port).
-
-7. **FPGA implementation** — port the SoC to the target FPGA, synthesise, and measure actual resource usage (LUTs, FFs, BRAM) and timing closure. Compare against the simulation-only memory models.
-
-8. **Final performance analysis** — collect crossover n, decompose fixed cost b (CSR writes, startup latency, completion notice), and compare against the software cost a. Document the result as a measured trade-off, not an assumption.
+6. **Final performance analysis** — collect crossover n, decompose fixed cost b (CSR writes, startup latency, completion notice), and compare against the software cost a. Document the result as a measured trade-off, not an assumption.
 
 ## Limitations
 
@@ -289,7 +309,12 @@ The following items remain to complete the project:
 
 4. The NDA data window is fixed at the 64 KiB RAM region. If the crossover point grows beyond approximately 16 K elements, a larger memory will be needed.
 
-5. Integration verification and software-driven tests for Phase 2 blocks are not yet complete. Performance crossover results therefore do not exist yet.
+5. Watchdog recovery requires outstanding AXI responses eventually to complete.
+   Temporary stalls are verified through C fallback and restart; permanent
+   slave nonresponse is not recoverable by the current serialized fabric.
+
+6. Performance crossover results do not exist yet. HPM ENABLE gates CYCLES
+   and NDA_BUSY; bus-event and FALLBACKS counters count continuously.
 
 ## External IP and Licensing
 

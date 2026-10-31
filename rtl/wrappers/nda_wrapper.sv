@@ -50,6 +50,7 @@ module nda_wrapper #(
   output logic [ID_WIDTH-1:0]  s_axi_rid,
   output logic [31:0]          s_axi_rdata,
   output logic [1:0]           s_axi_rresp,
+  output wire                  s_axi_rlast,
   output logic                 s_axi_rvalid,
   input  wire                  s_axi_rready,
 
@@ -88,6 +89,7 @@ module nda_wrapper #(
   logic        done_flag;
   logic        err_flag;
   logic [3:0]  err_code_reg;
+  logic [3:0]  drain_error_code;
   logic [31:0] result_lo_reg;
   logic [31:0] result_hi_reg;
   logic [31:0] cycles_reg;
@@ -125,6 +127,7 @@ module nda_wrapper #(
   logic [ID_WIDTH-1:0]   w_id;
   logic [ADDR_WIDTH-1:0] w_addr;
   logic                  w_is_burst;
+  logic [7:0]            w_left;
 
   // w_fire: the cycle the W beat is accepted
   wire w_fire = (wstate == W_DATA) && s_axi_wvalid;
@@ -137,7 +140,7 @@ module nda_wrapper #(
       w_bresp = 2'b10;
     end else begin
       case (w_addr[11:0])
-        12'h000: if (s_axi_wdata[0] && nda_busy) w_bresp = 2'b10; // START while BUSY
+        12'h000: if (s_axi_wstrb[0] && s_axi_wdata[0] && nda_busy) w_bresp = 2'b10;
         12'h004: ; // STATUS W1C — always OK
         12'h008, 12'h00C, 12'h010: if (nda_busy) w_bresp = 2'b10; // OP/SRC/LEN while BUSY
         12'h014, 12'h018, 12'h01C: w_bresp = 2'b10; // RO registers
@@ -155,6 +158,7 @@ module nda_wrapper #(
       w_id         <= '0;
       w_addr       <= '0;
       w_is_burst   <= 1'b0;
+      w_left       <= 0;
       s_axi_bvalid <= 1'b0;
       s_axi_bresp  <= 2'b00;
       s_axi_bid    <= '0;
@@ -164,16 +168,20 @@ module nda_wrapper #(
           if (s_axi_awvalid) begin
             w_id       <= s_axi_awid;
             w_addr     <= s_axi_awaddr;
-            w_is_burst <= (s_axi_awlen != 8'd0);
+            w_is_burst <= (s_axi_awlen != 0 || s_axi_awsize != 2 || s_axi_awburst != 1);
+            w_left     <= s_axi_awlen;
             wstate     <= W_DATA;
           end
         end
         W_DATA: begin
           if (s_axi_wvalid) begin
-            s_axi_bid    <= w_id;
-            s_axi_bresp  <= w_bresp;
-            s_axi_bvalid <= 1'b1;
-            wstate       <= W_RESP;
+            if (w_left != 0) w_left <= w_left - 1'b1;
+            else begin
+              s_axi_bid    <= w_id;
+              s_axi_bresp  <= w_bresp;
+              s_axi_bvalid <= 1'b1;
+              wstate       <= W_RESP;
+            end
           end
         end
         W_RESP: begin
@@ -196,6 +204,8 @@ module nda_wrapper #(
   logic [ID_WIDTH-1:0]   r_id;
   logic [ADDR_WIDTH-1:0] r_addr;
   logic                  r_is_burst;
+  logic [7:0]            r_left;
+  assign s_axi_rlast = (r_left == 0);
 
   // Read data and response (combinational — uses s_axi_araddr directly)
   logic [31:0] r_rdata;
@@ -203,7 +213,7 @@ module nda_wrapper #(
   always_comb begin
     r_rresp = 2'b00;
     r_rdata = 32'h0;
-    if (s_axi_arlen != 8'd0) begin
+    if (s_axi_arlen != 0 || s_axi_arsize != 2 || s_axi_arburst != 1) begin
       r_rresp = 2'b10;
     end else begin
       case (s_axi_araddr[11:0])
@@ -228,6 +238,7 @@ module nda_wrapper #(
       r_id         <= '0;
       r_addr       <= '0;
       r_is_burst   <= 1'b0;
+      r_left       <= 0;
       s_axi_rvalid <= 1'b0;
       s_axi_rresp  <= 2'b00;
       s_axi_rdata  <= 32'h0;
@@ -239,6 +250,7 @@ module nda_wrapper #(
             r_id       <= s_axi_arid;
             r_addr     <= s_axi_araddr;
             r_is_burst <= (s_axi_arlen != 8'd0);
+            r_left     <= s_axi_arlen;
             s_axi_rid    <= s_axi_arid;
             s_axi_rdata  <= r_rdata;
             s_axi_rresp   <= r_rresp;
@@ -248,8 +260,11 @@ module nda_wrapper #(
         end
         R_RESP: begin
           if (s_axi_rready) begin
-            s_axi_rvalid <= 1'b0;
-            rstate       <= R_IDLE;
+            if (r_left != 0) r_left <= r_left - 1'b1;
+            else begin
+              s_axi_rvalid <= 1'b0;
+              rstate       <= R_IDLE;
+            end
           end
         end
         default: rstate <= R_IDLE;
@@ -258,7 +273,7 @@ module nda_wrapper #(
   end
 
   // ===========================================================================
-  // AXI read master — AR channel (combinational valid, registered state)
+  // AXI read master — registered request, held through acceptance
   // ===========================================================================
 
   // Burst length: min of remaining elements, BURST_LEN, and beats to 4KB boundary
@@ -268,17 +283,25 @@ module nda_wrapper #(
   wire [31:0] burst_len = (burst_len_raw < beats_to_boundary) ?
                           burst_len_raw : beats_to_boundary;
 
-  wire ar_issue = (fsm == RUN) &&
-                  (elem_to_issue != 0) &&
-                  (outstanding < MAX_OUTSTANDING);
-  wire ar_fire  = ar_issue && m_axi_arready;
+  logic ar_pending;
+  wire ar_fire = ar_pending && m_axi_arready;
+  wire abort_now = abort_req || wdt_abort_i;
+
+  // A presented request survives abort until accepted. DRAIN must then
+  // consume its response as well as those already outstanding.
+  always_ff @(posedge clk or negedge aresetn) begin
+    if (!aresetn) ar_pending <= 1'b0;
+    else if (ar_fire) ar_pending <= 1'b0;
+    else if (fsm == RUN && !abort_now && elem_to_issue != 0 &&
+             outstanding < MAX_OUTSTANDING) ar_pending <= 1'b1;
+  end
 
   assign m_axi_arid    = '0;              // constant ARID
   assign m_axi_araddr  = cur_addr;
   assign m_axi_arlen   = burst_len - 1;
   assign m_axi_arsize  = 3'b010;          // 4 bytes
   assign m_axi_arburst = 2'b01;           // INCR
-  assign m_axi_arvalid = ar_issue;
+  assign m_axi_arvalid = ar_pending;
 
   // R channel
   assign m_axi_rready = (fsm == RUN) || (fsm == DRAIN);
@@ -295,7 +318,7 @@ module nda_wrapper #(
   // Main always_ff: FSM + registers + datapath + address gen + cycle counter
   // ===========================================================================
   // Range check helper: 35-bit arithmetic to prevent wrap on huge LEN
-  logic [34:0] range_end;
+  wire [34:0] range_end = {3'b0, src_base_reg} + ({3'b0, len_reg} << 2);
 
   always_ff @(posedge clk or negedge aresetn) begin
     if (!aresetn) begin
@@ -307,6 +330,7 @@ module nda_wrapper #(
       done_flag     <= 1'b0;
       err_flag      <= 1'b0;
       err_code_reg  <= 4'h0;
+      drain_error_code <= 4'h0;
       result_lo_reg <= 32'h0;
       result_hi_reg <= 32'h0;
       cycles_reg    <= 32'h0;
@@ -327,35 +351,41 @@ module nda_wrapper #(
       best_val  <= 32'h0;
       best_idx  <= 32'h0;
     end else begin
+      abort_req <= 1'b0;
+      if (fsm == RUN || fsm == DRAIN) begin
+        case ({ar_fire, (r_fire && m_axi_rlast)})
+          2'b10: outstanding <= outstanding + 16'd1;
+          2'b01: outstanding <= outstanding - 16'd1;
+          default: ;
+        endcase
+      end
       // --- Cycle counter: counts while not in IDLE ---
       if (fsm != IDLE)
         cycles_reg <= cycles_reg + 32'd1;
 
       // --- CSR write effects (w_fire from CSR write FSM) ---
-      if (w_fire) begin
+      if (w_fire && w_bresp == 2'b00) begin
         case (w_addr[11:0])
           12'h000: begin // CTRL
-            if (s_axi_wdata[0] && !nda_busy) start_req  <= 1'b1;
-            if (s_axi_wdata[1])              abort_req <= 1'b1;
+            if (s_axi_wstrb[0] && s_axi_wdata[0] && !nda_busy) start_req <= 1'b1;
+            if (s_axi_wstrb[0] && s_axi_wdata[1] && nda_busy) abort_req <= 1'b1;
             if (s_axi_wstrb[0])              irq_en_reg <= s_axi_wdata[2];
           end
           12'h004: begin // STATUS W1C
-            if (s_axi_wdata[1]) done_flag <= 1'b0;
-            if (s_axi_wdata[2]) begin
+            if (s_axi_wstrb[0] && s_axi_wdata[1]) done_flag <= 1'b0;
+            if (s_axi_wstrb[0] && s_axi_wdata[2]) begin
               err_flag    <= 1'b0;
               err_code_reg <= 4'h0;
             end
           end
-          12'h008: if (!nda_busy) op_reg       <= s_axi_wdata[3:0];
-          12'h00C: if (!nda_busy) src_base_reg <= s_axi_wdata;
-          12'h010: if (!nda_busy) len_reg      <= s_axi_wdata;
+          12'h008: if (s_axi_wstrb[0]) op_reg <= s_axi_wdata[3:0];
+          12'h00C: for (int b = 0; b < 4; b++)
+            if (s_axi_wstrb[b]) src_base_reg[b*8 +: 8] <= s_axi_wdata[b*8 +: 8];
+          12'h010: for (int b = 0; b < 4; b++)
+            if (s_axi_wstrb[b]) len_reg[b*8 +: 8] <= s_axi_wdata[b*8 +: 8];
           default: ; // RO or undefined — no register write
         endcase
       end
-
-      // --- WDT abort (OR-ed with CTRL.ABORT) ---
-      if (wdt_abort_i)
-        abort_req <= 1'b1;
 
       // --- FSM ---
       case (fsm)
@@ -366,14 +396,19 @@ module nda_wrapper #(
             done_flag    <= 1'b0;
             err_flag     <= 1'b0;
             err_code_reg <= 4'h0;
-            cycles_reg   <= 32'h0;
+            cycles_reg   <= 32'd1; // one cycle since the accepted START write
             fsm          <= CHECK;
           end
         end
 
         CHECK: begin
           // Config checks in fixed order (first error wins)
-          if (len_reg == 0) begin
+          if (abort_now) begin
+            err_flag <= 1'b1;
+            err_code_reg <= soc_pkg::NDA_ERR_ABORTED;
+            done_flag <= 1'b1;
+            fsm <= IDLE;
+          end else if (len_reg == 0) begin
             err_flag    <= 1'b1;
             err_code_reg <= soc_pkg::NDA_ERR_BAD_LEN;
             done_flag   <= 1'b1;
@@ -396,7 +431,6 @@ module nda_wrapper #(
             fsm         <= IDLE;
           end else begin
             // Range check: 35-bit arithmetic
-            range_end = {3'b0, src_base_reg} + ({3'b0, len_reg} << 2);
             if (range_end > soc_pkg::NDA_DATA_END) begin
               err_flag    <= 1'b1;
               err_code_reg <= soc_pkg::NDA_ERR_BAD_RANGE;
@@ -425,15 +459,13 @@ module nda_wrapper #(
           if (ar_fire) begin
             cur_addr      <= cur_addr + (burst_len << 2);
             elem_to_issue <= elem_to_issue - burst_len;
-            outstanding   <= outstanding + 16'd1;
           end
 
           // --- R beat consumer + datapath ---
           if (r_fire) begin
             if (m_axi_rresp != 2'b00) begin
               // Bus error — enter DRAIN
-              err_flag     <= 1'b1;
-              err_code_reg <= soc_pkg::NDA_ERR_BUS_ERROR;
+              drain_error_code <= soc_pkg::NDA_ERR_BUS_ERROR;
               fsm          <= DRAIN;
             end else begin
               // Feed to datapath
@@ -460,16 +492,13 @@ module nda_wrapper #(
               elem_received  <= elem_received + 32'd1;
               elem_idx       <= elem_idx + 32'd1;
             end
-            // Outstanding tracking (both OKAY and error)
-            if (m_axi_rlast)
-              outstanding <= outstanding - 16'd1;
+            // Outstanding accounting is shared by RUN and DRAIN above.
           end
 
           // --- Abort check ---
-          if (abort_req) begin
+          if (abort_now && !(r_fire && m_axi_rresp != 2'b00)) begin
             abort_req    <= 1'b0;
-            err_flag     <= 1'b1;
-            err_code_reg <= soc_pkg::NDA_ERR_ABORTED;
+            drain_error_code <= soc_pkg::NDA_ERR_ABORTED;
             fsm          <= DRAIN;
           end
 
@@ -489,7 +518,7 @@ module nda_wrapper #(
             next_bidx = (this_beat && ($signed(m_axi_rdata) > $signed(best_val))) ?
                          elem_idx : best_idx;
             if (recv_after == total_elements && total_elements != 0 &&
-                !abort_req) begin
+                !abort_now) begin
               done_flag <= 1'b1;
               case (op_reg)
                 soc_pkg::NDA_OP_SUM: begin
@@ -519,10 +548,9 @@ module nda_wrapper #(
 
         DRAIN: begin
           // Wait for all outstanding R responses
-          if (r_fire && m_axi_rlast)
-            outstanding <= outstanding - 16'd1;
-
-          if (outstanding == 16'h0) begin
+          if (outstanding == 16'h0 && !ar_pending) begin
+            err_flag <= 1'b1;
+            err_code_reg <= drain_error_code;
             done_flag <= 1'b1;
             fsm       <= IDLE;
           end
@@ -533,6 +561,17 @@ module nda_wrapper #(
     end
   end
 
+  // synthesis translate_off
+  initial begin
+    assert (BURST_LEN >= 1 && BURST_LEN <= 256 &&
+            MAX_OUTSTANDING >= 1 && MAX_OUTSTANDING <= 65535)
+      else $fatal(1, "Invalid NDA burst/outstanding parameters");
+  end
+  assert property (@(posedge clk) disable iff (!aresetn)
+    m_axi_arvalid && !m_axi_arready |=>
+      m_axi_arvalid && $stable({m_axi_araddr, m_axi_arlen}))
+    else $fatal(1, "NDA withdrew or changed stalled AR");
+  // synthesis translate_on
 endmodule
 
 `resetall

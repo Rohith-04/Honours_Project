@@ -3,7 +3,7 @@
 #
 #   make unit IP=gpio|timer|uart|ram   run a Level-1 unit test
 #   make integration                run the Level-2 integration test
-#   make sw IP=gpio|uart|timer       run a Level-3 SW test (real VeeR + C)
+#   make sw IP=gpio|uart|timer|nda|hpm|wdt       run a Level-3 SW test (real VeeR + C)
 #   make verdi LEVEL=unit IP=gpio   re-run with FSDB dump + open Verdi
 #   make verdi LEVEL=integration    (IP not needed for integration)
 #   make verdi LEVEL=sw IP=gpio     (rebuilds SW hex + simv with FSDB)
@@ -20,21 +20,23 @@
 
 PROJ_ROOT := $(abspath $(dir $(lastword $(MAKEFILE_LIST))))
 
-VCS   := vcs
-VERDI := verdi
-
-VERDI_HOME ?= $(shell echo $$VERDI_HOME)
+VCS_HOME ?= /home/student/snps_tools_target/vcs/U-2023.03
+export VCS_HOME
+VCS   := $(VCS_HOME)/bin/vcs
+RUN_ROOT ?= $(PROJ_ROOT)/run/phase2$(if $(filter 0,$(HPM)),_nohpm,)
+HPM ?= 1
+ifeq ($(HPM),0)
+override DEFINES += +define+SOC_DISABLE_HPM
+endif
+VERDI_HOME ?= /home/student/snps_tools_target/verdi/U-2023.03-SP1
+VERDI := $(VERDI_HOME)/bin/verdi
 FSDB_PLI    = $(VERDI_HOME)/share/PLI/VCS/LINUX64
 
 # Extra compile defines from the command line, e.g.
 #   make unit IP=ram DEFINES=+define+RAM_DEBUG
 DEFINES ?=
 
-# NOTE: -nc (no incremental compile) is deliberate. VCS's incremental cache
-# (./csrc, shared across targets) silently reused stale interconnect objects
-# after rtl/ edits, so a fix showed zero effect and cost a full debug cycle
-# chasing a ghost. Full rebuilds of this design take seconds; silent
-# staleness is unacceptable in a verification flow.
+# Each target has a private -Mdir. Historical root csrc/ is never reused.
 VCS_FLAGS := \
     -full64 \
     -sverilog \
@@ -127,18 +129,19 @@ integration_TOP   := tb_soc_integration
 
 # --- Level 3 (SW): real VeeR EL2 + adapter + SoC + compiled C -----------------
 VEER_ROOT  := $(PROJ_ROOT)/Cores-VeeR-EL2
-VEER_BUILD := $(PROJ_ROOT)/build/veer
+VEER_BUILD := $(PROJ_ROOT)/build/veer_phase2
 VEER_FLIST := $(VEER_BUILD)/flist.sw
 
 # VeeR config for SW sims: AXI4 master, no ICCM/DCCM/ICache (all fetches and
 # data go over AXI to our RAM; SRAM exports float). Regenerate when
 # veer.config changes. Adapter ID widths (3/3/1) match these defaults.
-$(VEER_BUILD)/common_defines.vh: $(VEER_ROOT)/configs/veer.config
+$(VEER_BUILD)/common_defines.vh: $(VEER_ROOT)/configs/veer.config $(VEER_ROOT)/tools/picmap Makefile
 	@mkdir -p $(VEER_BUILD)
 	@echo "[make] generating VeeR config (axi4, no iccm/dccm/icache)..."
-	BUILD_PATH=$(VEER_BUILD) $(VEER_ROOT)/configs/veer.config \
+	RV_ROOT=$(VEER_ROOT) BUILD_PATH=$(VEER_BUILD) $(VEER_ROOT)/configs/veer.config \
 	    -target=default -set build_axi4 \
 	    -set iccm_enable=0 -set icache_enable=0 -set dccm_enable=0
+	@test -s $(VEER_BUILD)/pic_map_auto.h || { echo "VeeR PIC map generation failed"; exit 1; }
 
 # Filtered design file list: drop only the testbench-side shim
 # (testbench/veer_wrapper.sv) — we instantiate design/el2_veer_wrapper
@@ -169,105 +172,122 @@ sw_VCSFLAGS := +define+RV_OPENSOURCE
 
 .PHONY: sw
 sw: $(VEER_BUILD)/common_defines.vh $(VEER_FLIST)
-	@if [ "$(IP)" != "gpio" -a "$(IP)" != "uart" -a "$(IP)" != "timer" ]; then \
-	    echo "usage: make sw IP=gpio|uart|timer"; exit 1; fi
-	@mkdir -p $(PROJ_ROOT)/run/sw_$(IP)
+	@test -s $(VEER_BUILD)/pic_map_auto.h || { echo "Missing/empty VeeR PIC map; regenerate the VeeR configuration"; exit 1; }
+	@if [ "$(IP)" != "gpio" -a "$(IP)" != "uart" -a "$(IP)" != "timer" -a "$(IP)" != "nda" -a "$(IP)" != "hpm" -a "$(IP)" != "wdt" ]; then \
+	    echo "usage: make sw IP=gpio|uart|timer|nda|hpm|wdt"; exit 1; fi
+	@mkdir -p $(RUN_ROOT)/sw_$(IP)
 	@echo "[make] building SW image for $(IP)..."
-	$(PROJ_ROOT)/scripts/build_sw.sh \
-	    $(PROJ_ROOT)/sw/$(IP)_test $(PROJ_ROOT)/run/sw_$(IP)
+	HAVE_HPM=$(HPM) $(PROJ_ROOT)/scripts/build_sw.sh \
+	    $(PROJ_ROOT)/sw/$(IP)_test $(RUN_ROOT)/sw_$(IP)
 	@echo "[make] compiling sw $(IP) (VeeR + SoC)..."
-	@RV_ROOT=$(VEER_ROOT) $(VCS) $(VCS_FLAGS) $(sw_VCSFLAGS) $(DEFINES) $(SW_INCDIRS) \
-	    -l $(PROJ_ROOT)/run/sw_$(IP)/compile.log \
-	    -o $(PROJ_ROOT)/run/sw_$(IP)/simv \
+	@RV_ROOT=$(VEER_ROOT) $(VCS) $(VCS_FLAGS) -top $(sw_TOP) -Mdir=$(RUN_ROOT)/sw_$(IP)/csrc $(sw_VCSFLAGS) $(DEFINES) $(SW_INCDIRS) \
+	    -l $(RUN_ROOT)/sw_$(IP)/compile.log \
+	    -o $(RUN_ROOT)/sw_$(IP)/simv \
 	    $(VEER_DEFS) \
 	    -f $(VEER_FLIST) \
 	    $(sw_FILES)
 	@echo "[make] simulating sw $(IP)..."
-	cd $(PROJ_ROOT)/run/sw_$(IP) && ./simv \
-	    -l $(PROJ_ROOT)/run/sw_$(IP)/sim.log \
+	cd $(RUN_ROOT)/sw_$(IP) && ./simv \
+	    -l $(RUN_ROOT)/sw_$(IP)/sim.log \
 	    +SW_TEST=$(IP) +SW_HEX=test.hex
+	python3 $(PROJ_ROOT)/scripts/check_sim.py $(RUN_ROOT)/sw_$(IP)/sim.log sw_$(IP)
 
 # --- unit -----------------------------------------------------------------------
 .PHONY: unit
 unit:
 	@if [ -z "$(IP)" ]; then echo "usage: make unit IP=gpio|timer|uart|ram|nda|wdt|hpm"; exit 1; fi
 	@if [ -z "$($(IP)_TOP)" ]; then echo "unknown IP '$(IP)' (gpio|timer|uart|ram|nda|wdt|hpm)"; exit 1; fi
-	@mkdir -p $(PROJ_ROOT)/run/unit_$(IP)
+	@mkdir -p $(RUN_ROOT)/unit_$(IP)
 	@echo "[make] compiling unit $(IP)..."
-	$(VCS) $(VCS_FLAGS) $(DEFINES) $(INCDIRS) \
-	    -l $(PROJ_ROOT)/run/unit_$(IP)/compile.log \
-	    -o $(PROJ_ROOT)/run/unit_$(IP)/simv \
+	$(VCS) $(VCS_FLAGS) -top $($(IP)_TOP) -Mdir=$(RUN_ROOT)/unit_$(IP)/csrc $(DEFINES) $(INCDIRS) \
+	    -l $(RUN_ROOT)/unit_$(IP)/compile.log \
+	    -o $(RUN_ROOT)/unit_$(IP)/simv \
 	    $($(IP)_UNIT)
 	@echo "[make] simulating unit $(IP)..."
-	cd $(PROJ_ROOT)/run/unit_$(IP) && ./simv \
-	    -l $(PROJ_ROOT)/run/unit_$(IP)/sim.log
+	cd $(RUN_ROOT)/unit_$(IP) && ./simv \
+	    -l $(RUN_ROOT)/unit_$(IP)/sim.log
+	python3 $(PROJ_ROOT)/scripts/check_sim.py $(RUN_ROOT)/unit_$(IP)/sim.log $($(IP)_TOP)
 
 # --- integration ------------------------------------------------------------------
 .PHONY: integration
 integration:
-	@mkdir -p $(PROJ_ROOT)/run/integration
+	@mkdir -p $(RUN_ROOT)/integration
 	@echo "[make] compiling integration..."
-	$(VCS) $(VCS_FLAGS) $(DEFINES) $(INCDIRS) \
-	    -l $(PROJ_ROOT)/run/integration/compile.log \
-	    -o $(PROJ_ROOT)/run/integration/simv \
+	$(VCS) $(VCS_FLAGS) -top $(integration_TOP) -Mdir=$(RUN_ROOT)/integration/csrc $(DEFINES) $(INCDIRS) \
+	    -l $(RUN_ROOT)/integration/compile.log \
+	    -o $(RUN_ROOT)/integration/simv \
 	    $(integration_FILES)
 	@echo "[make] simulating integration..."
-	cd $(PROJ_ROOT)/run/integration && ./simv \
-	    -l $(PROJ_ROOT)/run/integration/sim.log
+	cd $(RUN_ROOT)/integration && ./simv \
+	    -l $(RUN_ROOT)/integration/sim.log
+	python3 $(PROJ_ROOT)/scripts/check_sim.py $(RUN_ROOT)/integration/sim.log $(integration_TOP)
 
 # --- verdi --------------------------------------------------------------------------
 # NOTE: LEVEL/IP dispatch uses shell conditionals (make `ifeq` cannot appear
 # inside a recipe). $($(IP)_UNIT)/$($(IP)_TOP) still expand at parse time.
 .PHONY: verdi
 verdi:
-	@if [ -z "$(LEVEL)" ]; then echo "usage: make verdi LEVEL=unit IP=gpio|timer|uart|ram|nda|wdt|hpm | LEVEL=integration | LEVEL=sw IP=gpio|uart|timer"; exit 1; fi
-	@if [ "$(LEVEL)" = "unit" ]; then \
+	@if [ -z "$(LEVEL)" ]; then echo "usage: make verdi LEVEL=unit IP=gpio|timer|uart|ram|nda|wdt|hpm | LEVEL=integration | LEVEL=sw IP=gpio|uart|timer|nda|hpm|wdt"; exit 1; fi
+	@set -e; if [ "$(LEVEL)" = "unit" ]; then \
 	    if [ -z "$(IP)" -o -z "$($(IP)_TOP)" ]; then echo "unit needs IP=gpio|timer|uart|ram|nda|wdt|hpm"; exit 1; fi; \
-	    mkdir -p $(PROJ_ROOT)/run/unit_$(IP); \
+	    mkdir -p $(RUN_ROOT)/unit_$(IP); \
 	    echo "[make] compiling unit $(IP) with FSDB..."; \
-	$(VCS) $(VCS_FLAGS_VERDI) $(DEFINES) $(INCDIRS) \
-	        -l $(PROJ_ROOT)/run/unit_$(IP)/compile.log \
-	        -o $(PROJ_ROOT)/run/unit_$(IP)/simv \
+	$(VCS) $(VCS_FLAGS_VERDI) -top $($(IP)_TOP) -Mdir=$(RUN_ROOT)/unit_$(IP)/csrc $(DEFINES) $(INCDIRS) \
+	        -l $(RUN_ROOT)/unit_$(IP)/compile.log \
+	        -o $(RUN_ROOT)/unit_$(IP)/simv \
 	        $($(IP)_UNIT); \
 	    echo "[make] simulating unit $(IP)..."; \
-	    cd $(PROJ_ROOT)/run/unit_$(IP) && ./simv -l sim.log; \
+	    cd $(RUN_ROOT)/unit_$(IP) && ./simv -l sim.log; \
+	    python3 $(PROJ_ROOT)/scripts/check_sim.py sim.log $($(IP)_TOP); \
 	    echo "[make] opening Verdi (no .rc yet — add waves/unit_$(IP).rc later)..."; \
-	    $(VERDI) -dbdir $(PROJ_ROOT)/run/unit_$(IP)/simv.daidir \
-	             -ssf $(PROJ_ROOT)/run/unit_$(IP)/$($(IP)_TOP).fsdb & \
+	    $(VERDI) -dbdir $(RUN_ROOT)/unit_$(IP)/simv.daidir \
+	             -ssf $(RUN_ROOT)/unit_$(IP)/$($(IP)_TOP).fsdb & \
 	elif [ "$(LEVEL)" = "integration" ]; then \
-	    mkdir -p $(PROJ_ROOT)/run/integration; \
+	    mkdir -p $(RUN_ROOT)/integration; \
 	    echo "[make] compiling integration with FSDB..."; \
-	$(VCS) $(VCS_FLAGS_VERDI) $(DEFINES) $(INCDIRS) \
-	        -l $(PROJ_ROOT)/run/integration/compile.log \
-	        -o $(PROJ_ROOT)/run/integration/simv \
+	$(VCS) $(VCS_FLAGS_VERDI) -top $(integration_TOP) -Mdir=$(RUN_ROOT)/integration/csrc $(DEFINES) $(INCDIRS) \
+	        -l $(RUN_ROOT)/integration/compile.log \
+	        -o $(RUN_ROOT)/integration/simv \
 	        $(integration_FILES); \
 	    echo "[make] simulating integration..."; \
-	    cd $(PROJ_ROOT)/run/integration && ./simv -l sim.log; \
+	    cd $(RUN_ROOT)/integration && ./simv -l sim.log; \
+	    python3 $(PROJ_ROOT)/scripts/check_sim.py sim.log $(integration_TOP); \
 	    echo "[make] opening Verdi (no .rc yet — add waves/integration.rc later)..."; \
-	    $(VERDI) -dbdir $(PROJ_ROOT)/run/integration/simv.daidir \
-	             -ssf $(PROJ_ROOT)/run/integration/$(integration_TOP).fsdb & \
+	    $(VERDI) -dbdir $(RUN_ROOT)/integration/simv.daidir \
+	             -ssf $(RUN_ROOT)/integration/$(integration_TOP).fsdb & \
 	elif [ "$(LEVEL)" = "sw" ]; then \
-	    if [ "$(IP)" != "gpio" -a "$(IP)" != "uart" -a "$(IP)" != "timer" ]; then echo "sw needs IP=gpio|uart|timer"; exit 1; fi; \
+	    if [ "$(IP)" != "gpio" -a "$(IP)" != "uart" -a "$(IP)" != "timer" -a "$(IP)" != "nda" -a "$(IP)" != "hpm" -a "$(IP)" != "wdt" ]; then echo "sw needs IP=gpio|uart|timer|nda|hpm|wdt"; exit 1; fi; \
 	    $(MAKE) --no-print-directory $(VEER_BUILD)/common_defines.vh $(VEER_FLIST); \
-	    mkdir -p $(PROJ_ROOT)/run/sw_$(IP); \
+	    mkdir -p $(RUN_ROOT)/sw_$(IP); \
 	    echo "[make] building SW image for $(IP)..."; \
-	    $(PROJ_ROOT)/scripts/build_sw.sh $(PROJ_ROOT)/sw/$(IP)_test $(PROJ_ROOT)/run/sw_$(IP); \
+	    HAVE_HPM=$(HPM) $(PROJ_ROOT)/scripts/build_sw.sh $(PROJ_ROOT)/sw/$(IP)_test $(RUN_ROOT)/sw_$(IP); \
 	    echo "[make] compiling sw $(IP) with FSDB..."; \
-	    RV_ROOT=$(VEER_ROOT) $(VCS) $(VCS_FLAGS_VERDI) $(sw_VCSFLAGS) $(DEFINES) $(SW_INCDIRS) \
-	        -l $(PROJ_ROOT)/run/sw_$(IP)/compile.log \
-	        -o $(PROJ_ROOT)/run/sw_$(IP)/simv \
+	    RV_ROOT=$(VEER_ROOT) $(VCS) $(VCS_FLAGS_VERDI) -top $(sw_TOP) -Mdir=$(RUN_ROOT)/sw_$(IP)/csrc $(sw_VCSFLAGS) $(DEFINES) $(SW_INCDIRS) \
+	        -l $(RUN_ROOT)/sw_$(IP)/compile.log \
+	        -o $(RUN_ROOT)/sw_$(IP)/simv \
 	        $(VEER_DEFS) \
 	        -f $(VEER_FLIST) \
 	        $(sw_FILES); \
 	    echo "[make] simulating sw $(IP)..."; \
-	    cd $(PROJ_ROOT)/run/sw_$(IP) && ./simv -l sim.log +SW_TEST=$(IP) +SW_HEX=test.hex; \
+	    cd $(RUN_ROOT)/sw_$(IP) && ./simv -l sim.log +SW_TEST=$(IP) +SW_HEX=test.hex; \
+	    python3 $(PROJ_ROOT)/scripts/check_sim.py sim.log sw_$(IP); \
 	    echo "[make] opening Verdi with waves/sw_$(IP).rc..."; \
-	    $(VERDI) -dbdir $(PROJ_ROOT)/run/sw_$(IP)/simv.daidir \
-	             -ssf $(PROJ_ROOT)/run/sw_$(IP)/$(sw_TOP).fsdb \
-	             -sswr $(PROJ_ROOT)/waves/sw_$(IP).rc & \
+	    wave_opt=""; \
+	    if [ -f $(PROJ_ROOT)/waves/sw_$(IP).rc ]; then wave_opt="-sswr $(PROJ_ROOT)/waves/sw_$(IP).rc"; fi; \
+	    $(VERDI) -dbdir $(RUN_ROOT)/sw_$(IP)/simv.daidir \
+	             -ssf $(RUN_ROOT)/sw_$(IP)/$(sw_TOP).fsdb $$wave_opt & \
 	else \
 	    echo "unknown LEVEL '$(LEVEL)' (unit|integration|sw)"; exit 1; \
 	fi
+
+.PHONY: phase2
+phase2:
+	@set -e; for ip in gpio timer uart ram nda wdt hpm; do \
+	    $(MAKE) --no-print-directory unit IP=$$ip; done
+	$(MAKE) --no-print-directory unit IP=nda DEFINES="$(DEFINES) +define+NDA_PIPELINED" RUN_ROOT=$(RUN_ROOT)/pipeline
+	$(MAKE) --no-print-directory integration
+	@set -e; for ip in gpio uart timer nda hpm wdt; do \
+	    $(MAKE) --no-print-directory sw IP=$$ip; done
 
 # --- clean ----------------------------------------------------------------------------
 .PHONY: clean

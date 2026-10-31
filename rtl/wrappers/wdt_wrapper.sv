@@ -45,6 +45,7 @@ module wdt_wrapper #(
   output logic [ID_WIDTH-1:0]  s_axi_rid,
   output logic [31:0]          s_axi_rdata,
   output logic [1:0]           s_axi_rresp,
+  output wire                  s_axi_rlast,
   output logic                 s_axi_rvalid,
   input  wire                  s_axi_rready,
 
@@ -85,6 +86,7 @@ module wdt_wrapper #(
   logic [ID_WIDTH-1:0]   w_id;
   logic [ADDR_WIDTH-1:0] w_addr;
   logic                  w_is_burst;
+  logic [7:0]            w_left;
 
   assign s_axi_awready = (wstate == W_IDLE);
   assign s_axi_wready  = (wstate == W_DATA);
@@ -102,6 +104,7 @@ module wdt_wrapper #(
       w_id         <= '0;
       w_addr       <= '0;
       w_is_burst   <= 1'b0;
+      w_left       <= 0;
       s_axi_bvalid <= 1'b0;
       s_axi_bresp  <= 2'b00;
       s_axi_bid    <= '0;
@@ -111,16 +114,20 @@ module wdt_wrapper #(
           if (s_axi_awvalid) begin
             w_id       <= s_axi_awid;
             w_addr     <= s_axi_awaddr;
-            w_is_burst <= (s_axi_awlen != 8'd0);
+            w_is_burst <= (s_axi_awlen != 0 || s_axi_awsize != 2 || s_axi_awburst != 1);
+            w_left <= s_axi_awlen;
             wstate     <= W_DATA;
           end
         end
         W_DATA: begin
           if (s_axi_wvalid) begin
-            s_axi_bid    <= w_id;
-            s_axi_bresp  <= w_ok ? 2'b00 : 2'b10;
-            s_axi_bvalid <= 1'b1;
-            wstate       <= W_RESP;
+            if (w_left != 0) w_left <= w_left - 1'b1;
+            else begin
+              s_axi_bid    <= w_id;
+              s_axi_bresp  <= w_ok ? 2'b00 : 2'b10;
+              s_axi_bvalid <= 1'b1;
+              wstate       <= W_RESP;
+            end
           end
         end
         W_RESP: begin
@@ -137,7 +144,16 @@ module wdt_wrapper #(
   // ===========================================================================
   // Watchdog logic (references w_fire/w_ok from CSR write FSM above)
   // ===========================================================================
-  wire timeout_active = en_reg && (timeout_reg != 0);
+  logic [31:0] timeout_effective;
+  always_comb begin
+    timeout_effective = timeout_reg;
+    if (w_fire && w_ok && w_hit_timeout)
+      for (int b = 0; b < 4; b++)
+        if (s_axi_wstrb[b]) timeout_effective[b*8 +: 8] = s_axi_wdata[b*8 +: 8];
+  end
+  wire en_effective = (w_fire && w_ok && w_hit_ctrl && s_axi_wstrb[0]) ?
+                       s_axi_wdata[0] : en_reg;
+  wire timeout_active = en_effective && (timeout_effective != 0);
 
   always_ff @(posedge clk or negedge aresetn) begin
     if (!aresetn) begin
@@ -158,21 +174,21 @@ module wdt_wrapper #(
         // Re-arm: clear tripped from previous job, reload counter
         armed       <= 1'b1;
         tripped     <= 1'b0;
-        wdt_counter <= timeout_reg;
+        wdt_counter <= timeout_effective;
       end
 
-      // Disarm when NDA goes idle
-      if (!nda_busy_i && prev_busy) begin
+      // Disabling an active watchdog takes effect without another busy edge.
+      if (!nda_busy_i || !timeout_active) begin
         armed <= 1'b0;
       end
 
       // While armed and busy
-      if (armed && nda_busy_i) begin
+      if (armed && nda_busy_i && timeout_active) begin
         if (nda_progress_i) begin
           // Progress — reload counter
-          wdt_counter <= timeout_reg;
+          wdt_counter <= timeout_effective;
         end else begin
-          if (wdt_counter == 32'd0) begin
+          if (wdt_counter <= 32'd1) begin
             // Trip!
             tripped      <= 1'b1;
             armed       <= 1'b0;
@@ -190,8 +206,12 @@ module wdt_wrapper #(
           en_reg     <= s_axi_wdata[0];
           irq_en_reg <= s_axi_wdata[2];
         end
-        if (w_hit_timeout && (|s_axi_wstrb)) timeout_reg <= s_axi_wdata;
-        if (w_hit_status && s_axi_wdata[0]) tripped <= 1'b0; // W1C
+        if (w_hit_timeout) begin
+          for (int b = 0; b < 4; b++)
+            if (s_axi_wstrb[b]) timeout_reg[b*8 +: 8] <= s_axi_wdata[b*8 +: 8];
+        end
+        if (w_hit_status && s_axi_wstrb[0] && s_axi_wdata[0]) tripped <= 1'b0;
+        if (w_hit_ctrl && s_axi_wstrb[0] && !s_axi_wdata[0]) armed <= 1'b0;
       end
 
       prev_busy <= nda_busy_i;
@@ -203,12 +223,15 @@ module wdt_wrapper #(
   // ===========================================================================
   typedef enum logic [1:0] {R_IDLE, R_RESP} rstate_t;
   rstate_t rstate;
+  logic [7:0] r_left;
+  assign s_axi_rlast = (r_left == 0);
 
   assign s_axi_arready = (rstate == R_IDLE);
 
   always_ff @(posedge clk or negedge aresetn) begin
     if (!aresetn) begin
       rstate       <= R_IDLE;
+      r_left       <= 0;
       s_axi_rvalid <= 1'b0;
       s_axi_rresp  <= 2'b00;
       s_axi_rdata  <= 32'h0;
@@ -217,8 +240,9 @@ module wdt_wrapper #(
       case (rstate)
         R_IDLE: begin
           if (s_axi_arvalid) begin
+            r_left <= s_axi_arlen;
             s_axi_rid <= s_axi_arid;
-            if ((s_axi_arlen != 8'd0) ||
+            if ((s_axi_arlen != 0 || s_axi_arsize != 2 || s_axi_arburst != 1) ||
                 (s_axi_araddr[11:0] != 12'h000 &&
                  s_axi_araddr[11:0] != 12'h004 &&
                  s_axi_araddr[11:0] != 12'h008 &&
@@ -228,7 +252,7 @@ module wdt_wrapper #(
             end else begin
               s_axi_rresp <= 2'b00;
               case (s_axi_araddr[3:2])
-                2'b00: s_axi_rdata <= {29'b0, irq_en_reg, 2'b0, en_reg}; // CTRL
+                2'b00: s_axi_rdata <= {29'b0, irq_en_reg, 1'b0, en_reg}; // CTRL
                 2'b01: s_axi_rdata <= timeout_reg;                     // TIMEOUT
                 2'b10: s_axi_rdata <= {30'b0, armed, tripped};          // STATUS
                 2'b11: s_axi_rdata <= trip_count_reg;                   // TRIP_COUNT
@@ -240,8 +264,11 @@ module wdt_wrapper #(
         end
         R_RESP: begin
           if (s_axi_rready) begin
-            s_axi_rvalid <= 1'b0;
-            rstate       <= R_IDLE;
+            if (r_left != 0) r_left <= r_left - 1'b1;
+            else begin
+              s_axi_rvalid <= 1'b0;
+              rstate       <= R_IDLE;
+            end
           end
         end
         default: rstate <= R_IDLE;

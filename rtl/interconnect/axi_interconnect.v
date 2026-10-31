@@ -506,8 +506,10 @@ genvar n;
 // request generation
 generate
 for (n = 0; n < S_COUNT; n = n + 1) begin
-    assign request[2*n]   = s_axi_awvalid[n];
-    assign request[2*n+1] = s_axi_arvalid[n];
+    // Exclude the completing owner so a VALID held through the response
+    // cannot be mistaken for another transaction at the release edge.
+    assign request[2*n]   = s_axi_awvalid[n] && !grant[2*n];
+    assign request[2*n+1] = s_axi_arvalid[n] && !grant[2*n+1];
 end
 endgenerate
 
@@ -675,9 +677,9 @@ always @* begin
             m_axi_wstrb_int = current_s_axi_wstrb;
             m_axi_wlast_int = current_s_axi_wlast;
             m_axi_wuser_int = current_s_axi_wuser;
-            m_axi_wvalid_int = 1'b1;
+            m_axi_wvalid_int = current_s_axi_wvalid && current_s_axi_wready;
 
-            if (current_s_axi_wlast) begin
+            if (current_s_axi_wvalid && current_s_axi_wready && current_s_axi_wlast) begin
                 s_axi_wready_next[s_select] = 1'b0;
                 m_axi_bready_next[m_select_reg] = 1'b1;
                 state_next = STATE_WRITE_RESP;

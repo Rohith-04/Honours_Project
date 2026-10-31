@@ -36,7 +36,7 @@ module tb_uart_unit;
   initial begin
     repeat (5_000_000) @(posedge clk);
     $display("TEST tb_uart_unit: FAIL (global timeout)");
-    $finish;
+    $fatal(1, "Global simulation timeout");
   end
 
   axi_master_bfm bfm_if (.clk(clk), .aresetn(aresetn));

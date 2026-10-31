@@ -3,8 +3,8 @@
 //
 // - Linked at 0x0000_0000 (see linker.ld); harness drives rst_vec=0.
 // - Sets mtvec to the trap handler, stack pointer to top of RAM,
-//   configures mrac CSR 0x7C0: region 1 (0x1000_0000-0x1FFF_FFFF, covering
-//   UART/Timer/GPIO) side-effecting + non-cacheable, everything else kept
+//   configures mrac CSR 0x7C0: region 1 (UART/Timer/GPIO) and region 5
+//   (NDA/HPM/WDT) side-effecting + non-cacheable, everything else kept
 //   idempotent + non-cacheable (safe bring-up: no caching, strict order).
 //   Follows with fence + fence.i per the PRM Memory Map chapter.
 // - Calls main(), then reports: a0==0 from main means PASS.
@@ -32,12 +32,21 @@ _start:
     csrw 0x7f9, t0
     fence.i
 
-    // mrac: region1 sideeffect=1 (bit3), cacheable=0 (bit2) -> 0x8.
-    li   t0, 0x8
+    // MRAC side-effect bits: region 1 bit 3, region 5 bit 11.
+    li   t0, 0x808      // regions 1 and 5: side-effecting, non-cacheable
     csrw 0x7c0, t0
     fence
     fence.i
 
+    // Initialize C zero-storage independently of simulation RAM contents.
+    la   t0, __bss_start
+    la   t1, __bss_end
+.Lbss:
+    bgeu t0, t1, .Lbss_done
+    sw   zero, 0(t0)
+    addi t0, t0, 4
+    j    .Lbss
+.Lbss_done:
     // Clear result word to 0 (= running, not yet passed).
     la   t0, sw_result
     sw   zero, 0(t0)

@@ -38,7 +38,7 @@ module tb_nda_unit;
   initial begin
     repeat (500_000) @(posedge clk);
     $display("TEST tb_nda_unit: FAIL (global timeout)");
-    $finish;
+    $fatal(1, "Global simulation timeout");
   end
 
   // --- BFM for CSR access ---
@@ -61,18 +61,70 @@ module tb_nda_unit;
   wire         nda_rlast;
   wire         nda_rvalid;
   wire         nda_rready;
+  logic stall_ar = 0, stall_r = 0, inject_error = 0;
+  wire ram_arready, ram_rvalid;
+  wire [1:0] ram_rresp;
+  wire [31:0] ram_rdata;
+  wire [11:0] ram_rid;
+  wire ram_rlast;
+`ifdef NDA_PIPELINED
+  localparam bit PIPELINED = 1;
+`else
+  localparam bit PIPELINED = 0;
+`endif
+  logic [31:0] queue_addr[0:7];
+  logic [8:0] queue_left[0:7];
+  logic [2:0] head = 0, tail = 0;
+  logic [3:0] queued = 0;
+  int delay_cycles = 0;
+  bit simultaneous_seen = 0;
+  assign nda_arready = !stall_ar && (PIPELINED ? queued < 2 : ram_arready);
+  assign nda_rvalid = !stall_r && (PIPELINED ? (queued != 0 && delay_cycles == 0) : ram_rvalid);
+  assign nda_rresp = inject_error ? 2'b10 : (PIPELINED ? 2'b00 : ram_rresp);
+  assign nda_rlast = PIPELINED ? queue_left[head] == 1 : ram_rlast;
+  assign nda_rid = PIPELINED ? 12'b0 : ram_rid;
+  assign nda_rdata = PIPELINED ? u_ram.mem[queue_addr[head] >> 2] : ram_rdata;
+  // An in-order slave with two queued bursts, independent AR/R channels.
+  // Unlike axi_ram it can accept a new AR on the same edge as an RLAST.
+  always @(posedge clk) begin
+    if (!aresetn) begin
+      head <= 0; tail <= 0; queued <= 0; delay_cycles <= 0;
+      simultaneous_seen <= 0;
+    end else if (PIPELINED) begin
+      if (delay_cycles != 0) delay_cycles <= delay_cycles - 1;
+      case ({nda_arvalid && nda_arready, nda_rvalid && nda_rready && nda_rlast})
+        2'b10: queued <= queued + 1'b1;
+        2'b01: queued <= queued - 1'b1;
+        2'b11: simultaneous_seen <= 1;
+        default: ;
+      endcase
+      if (nda_arvalid && nda_arready) begin
+        queue_addr[tail] <= nda_araddr;
+        queue_left[tail] <= {1'b0, nda_arlen} + 1'b1;
+        tail <= tail + 1'b1;
+        if (queued == 0) delay_cycles <= 8;
+      end
+      if (nda_rvalid && nda_rready) begin
+        if (nda_rlast) head <= head + 1'b1;
+        else begin
+          queue_addr[head] <= queue_addr[head] + 4;
+          queue_left[head] <= queue_left[head] - 1'b1;
+        end
+      end
+    end
+  end
 
   // Sideband
   wire nda_busy_w;
   wire nda_progress_w;
-  wire wdt_abort_w = 1'b0; // no WDT in unit test
+  logic wdt_abort_w = 1'b0; // explicitly injected hardware abort
   wire nda_irq_w;
 
   // --- DUT: NDA wrapper ---
   nda_wrapper #(
     .ID_WIDTH   (soc_pkg::AXI_ID_WIDTH),
     .ADDR_WIDTH (soc_pkg::AXI_ADDR_WIDTH),
-    .BURST_LEN       (4),  // small for fast sim
+    .BURST_LEN       (PIPELINED ? 2 : 4),
     .MAX_OUTSTANDING (2)
   ) dut (
     .clk           (clk),
@@ -104,6 +156,7 @@ module tb_nda_unit;
     .s_axi_rid     (bfm_if.rid),
     .s_axi_rdata   (bfm_if.rdata),
     .s_axi_rresp   (bfm_if.rresp),
+    .s_axi_rlast   (bfm_if.rlast),
     .s_axi_rvalid  (bfm_if.rvalid),
     .s_axi_rready  (bfm_if.rready),
 
@@ -160,14 +213,14 @@ module tb_nda_unit;
     .s_axi_arlen   (nda_arlen),
     .s_axi_arsize  (nda_arsize),
     .s_axi_arburst (nda_arburst),
-    .s_axi_arvalid (nda_arvalid),
-    .s_axi_arready (nda_arready),
-    .s_axi_rid     (nda_rid),
-    .s_axi_rdata   (nda_rdata),
-    .s_axi_rresp   (nda_rresp),
-    .s_axi_rlast   (nda_rlast),
-    .s_axi_rvalid  (nda_rvalid),
-    .s_axi_rready  (nda_rready)
+    .s_axi_arvalid (nda_arvalid && !stall_ar && !PIPELINED),
+    .s_axi_arready (ram_arready),
+    .s_axi_rid     (ram_rid),
+    .s_axi_rdata   (ram_rdata),
+    .s_axi_rresp   (ram_rresp),
+    .s_axi_rlast   (ram_rlast),
+    .s_axi_rvalid  (ram_rvalid),
+    .s_axi_rready  (nda_rready && !stall_r)
   );
 
   // --- Helper: write an array into RAM via BFM (using the RAM's write port) ---
@@ -202,7 +255,7 @@ module tb_nda_unit;
       t++;
       if (t > tb_pkg::POLL_MAX) begin
         $display("[FAIL] NDA timeout waiting for DONE");
-        break;
+        $fatal(1, "NDA completion timeout");
       end
     end
   endtask
@@ -445,6 +498,77 @@ module tb_nda_unit;
     nda_read(bfm_if, 32'h20, rdata, resp); // offset 0x20 is undefined
     check_equal("undef_read_slverr", 32'h2, {30'b0, resp});
 
+    // Signed accumulation including a negative final beat, across bursts.
+    for (i = 0; i < 65; i++) ram_set(i, -3);
+    nda_write(bfm_if, NDA_LEN, 65, resp);
+    nda_write(bfm_if, NDA_CTRL, 1, resp);
+    wait_nda_done;
+    nda_read(bfm_if, NDA_RESULT_LO, rdata, resp);
+    check_equal("negative_multiburst_lo", -195, rdata);
+    nda_read(bfm_if, NDA_RESULT_HI, rdata, resp);
+    check_equal("negative_multiburst_hi", 32'hffffffff, rdata);
+
+    // Idle abort is a no-op, never a delayed abort of the next job.
+    nda_write(bfm_if, NDA_CTRL, 2, resp);
+    nda_write(bfm_if, NDA_CTRL, 1, resp);
+    wait_nda_done;
+    nda_read(bfm_if, NDA_STATUS, rdata, resp);
+    check_equal("idle_abort_not_latched", 2, rdata);
+    nda_write(bfm_if, NDA_LEN, 32'hffffffff, resp);
+    nda_write(bfm_if, NDA_CTRL, 1, resp);
+    wait_nda_done;
+    nda_read(bfm_if, NDA_STATUS, rdata, resp);
+    check_equal("huge_length_range_check", 32'h56, rdata);
+    nda_write(bfm_if, NDA_LEN, 65, resp);
+    nda_write(bfm_if, NDA_CTRL, 1, resp);
+    wait_nda_done;
+
+    // A zero-strobe START must not clear DONE or generate any work.
+    bfm_if.write(NDA_BASE + NDA_CTRL, 1, 0, resp);
+    nda_read(bfm_if, NDA_STATUS, rdata, resp);
+    check_equal("zero_strobe_no_start", 2, rdata);
+
+    // Abort with an unaccepted AR: VALID/address must persist to acceptance.
+    stall_ar = 1;
+    nda_write(bfm_if, NDA_CTRL, 1, resp);
+    wait (nda_arvalid);
+    nda_write(bfm_if, NDA_CTRL, 2, resp);
+    repeat (5) @(negedge clk);
+    check_equal("pending_ar_held_on_abort", 1, nda_arvalid);
+    check_equal("pending_ar_address_stable", 0, nda_araddr);
+    stall_ar = 0;
+    wait_nda_done;
+    nda_read(bfm_if, NDA_STATUS, rdata, resp);
+    check_equal("pending_ar_abort_drained", 32'h76, rdata);
+
+    // Inject SLVERR on accepted read data, drain, then restart cleanly.
+    inject_error = 1;
+    nda_write(bfm_if, NDA_CTRL, 1, resp);
+    wait_nda_done;
+    nda_read(bfm_if, NDA_STATUS, rdata, resp);
+    check_equal("read_bus_error", 32'h66, rdata);
+    inject_error = 0;
+    nda_write(bfm_if, NDA_CTRL, 1, resp);
+    wait_nda_done;
+    nda_read(bfm_if, NDA_RESULT_LO, rdata, resp);
+    check_equal("restart_after_error", -195, rdata);
+    nda_read(bfm_if, NDA_STATUS, rdata, resp);
+    check_equal("restart_status", 2, rdata);
+    // Completion IRQ must wait for drain, never expose an unfinished error.
+    stall_r = 1;
+    nda_write(bfm_if, NDA_CTRL, 5, resp);
+    wait (dut.outstanding != 0);
+    @(negedge clk); wdt_abort_w = 1;
+    @(negedge clk); wdt_abort_w = 0;
+    repeat (5) @(negedge clk);
+    check_equal("drain_still_busy", 1, nda_busy_w);
+    check_equal("no_premature_error_irq", 0, nda_irq_w);
+    stall_r = 0;
+    wait_nda_done;
+    nda_read(bfm_if, NDA_STATUS, rdata, resp);
+    check_equal("hardware_abort_completed", 32'h76, rdata);
+    check_equal("error_irq_after_drain", 1, nda_irq_w);
+    if (PIPELINED) check_equal("simultaneous_ar_rlast_exercised", 1, simultaneous_seen);
     report_results("tb_nda_unit");
   end
 

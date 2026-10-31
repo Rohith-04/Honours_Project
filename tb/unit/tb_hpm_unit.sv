@@ -35,7 +35,7 @@ module tb_hpm_unit;
   initial begin
     repeat (500_000) @(posedge clk);
     $display("TEST tb_hpm_unit: FAIL (global timeout)");
-    $finish;
+    $fatal(1, "Global simulation timeout");
   end
 
   axi_master_bfm bfm_if (.clk(clk), .aresetn(aresetn));
@@ -81,6 +81,7 @@ module tb_hpm_unit;
     .s_axi_rid     (bfm_if.rid),
     .s_axi_rdata   (bfm_if.rdata),
     .s_axi_rresp   (bfm_if.rresp),
+    .s_axi_rlast   (bfm_if.rlast),
     .s_axi_rvalid  (bfm_if.rvalid),
     .s_axi_rready  (bfm_if.rready),
 
@@ -271,6 +272,19 @@ module tb_hpm_unit;
     hpm_read(bfm_if, 32'h04, rdata, resp); // 0x04 is undefined (gap)
     check_equal("undef_read_slverr", 32'h2, {30'b0, resp});
 
+    // A snapshot is immutable even while live bus counters advance.
+    hpm_write(bfm_if, HPM_CTRL, 4, resp);
+    hpm_read(bfm_if, HPM_CPU_AR_LO, rdata, resp);
+    @(negedge clk); m0_ar_v = 1; m0_ar_r = 1;
+    repeat (7) @(negedge clk);
+    m0_ar_v = 0; m0_ar_r = 0;
+    hpm_read(bfm_if, HPM_CPU_AR_LO, rdata_hi, resp);
+    check_equal("snapshot_immutable", rdata, rdata_hi);
+    hpm_write(bfm_if, HPM_CTRL, 4, resp);
+    hpm_read(bfm_if, HPM_CPU_AR_LO, rdata_hi, resp);
+    check_equal("next_snapshot_includes_events", rdata + 7, rdata_hi);
+    bfm_if.read(HPM_BASE + 32'h11, rdata, resp);
+    check_equal("misaligned_counter_slverr", 2, resp);
     report_results("tb_hpm_unit");
   end
 
