@@ -30,7 +30,16 @@ import soc_pkg::*;
 import tb_pkg::*;
 `include "tb_tasks.svh"
 
-module tb_soc_sw;
+// Default mode retains the original standalone checker and $finish. A parent
+// UVM top can request completion publication while owning simulation lifetime.
+module tb_soc_sw #(
+  parameter bit EXTERNAL_COMPLETION = 0
+)(
+  output bit completion_done = 0,
+  output bit completion_pass = 0,
+  output bit completion_uart_ok = 0,
+  output logic [31:0] completion_signature = 0
+);
 
   logic clk = 1'b0;
   logic aresetn;
@@ -38,8 +47,10 @@ module tb_soc_sw;
 
   `ifdef FSDB_DUMP
   initial begin
-    $fsdbDumpfile("tb_soc_sw.fsdb");
-    $fsdbDumpvars(0, tb_soc_sw);
+    if (!EXTERNAL_COMPLETION) begin
+      $fsdbDumpfile("tb_soc_sw.fsdb");
+      $fsdbDumpvars(0, tb_soc_sw);
+    end
   end
   `endif
 
@@ -504,7 +515,11 @@ module tb_soc_sw;
       check_equal("sw_timer_irq", 32'h1, {31'b0, saw_timer_irq});
     if (sw_test == "nda") check_equal("sw_nda_irq", 1, saw_nda_irq);
     if (sw_test == "wdt") check_equal("sw_wdt_irq", 1, saw_wdt_irq);
-    report_results({"sw_", sw_test});
+    completion_signature = sig;
+    completion_uart_ok = uart_ok;
+    completion_pass = (fail_count == 0);
+    completion_done = 1;
+    if (!EXTERNAL_COMPLETION) report_results({"sw_", sw_test});
   end
 
 endmodule

@@ -9,7 +9,10 @@ integration verification, and NDA/HPM/WDT software tests on VeeR are complete.
 Run `make phase2` and `make phase2 HPM=0`. See
 [the Phase 2 verification record](doc/verification/phase2.md) for coverage,
 software interrupts, HPM enable semantics, commands and recovery limits.
-Performance measurements and UVM are deferred.
+Performance measurements remain deferred. **GPIO UVM verification was added
+on 2026-11-07:** separate active standalone and software-driven passive flows
+are available under `uvm/`. See [GPIO UVM verification](#gpio-uvm-verification)
+and [the passive software flow](uvm/gpio_sw/README.md).
 
 ## Project Overview
 
@@ -37,7 +40,7 @@ The main objective is to measure the actual crossover point where NDA execution 
 | **64 KiB AXI RAM** | Program and data memory at `0x0000_0000` |
 | **UART** | Console output at `0x1000_0000` |
 | **Timer** | Free-running counter with compare/match interrupt at `0x1001_0000` |
-| **GPIO** | 8 bidirectional GPIO pins at `0x1002_0000` |
+| **GPIO** | 8-bit GPIO with split inputs and direction-masked outputs at `0x1002_0000` |
 | **64→32 AXI Adapter** | Converts the VeeR EL2 64-bit IFU/LSU interface to the 32-bit SoC fabric |
 
 ### Phase 2: NDA, HPM, and WDT — Directed Baseline Through Software
@@ -91,7 +94,11 @@ scripts/axi_interconnect_wrap.py
 
 Phase 1 used `axi_interconnect_wrap_1x4.v`. Phase 2 uses `axi_interconnect_wrap_2x7.v` (or `_2x6` without HPM). Sideband signals (NDA handshakes, WDT abort, HPM tap wires, interrupts) remain separate from the AXI fabric.
 
-The crossbar serialises transactions through a single FSM. With two concurrent masters, CPU and NDA traffic serialise under round-robin arbitration. CPU latency while the NDA streams is bounded by one NDA burst (`BURST_LEN`). This is a known limitation documented as part of the crossover measurement.
+The crossbar serialises transactions through a single FSM, with round-robin
+arbitration across AW/AR request entries. Ownership lasts through the response
+handshake. `BURST_LEN` limits the beats in one NDA burst; CPU wait time also
+depends on competing requests, slave response latency and backpressure, so
+this is not an unconditional clock-cycle latency bound.
 
 ## Verification
 
@@ -112,6 +119,92 @@ The complete AXI fabric is tested with all slaves present through the real inter
 ### Level 3: Software Verification
 
 Compiled RISC-V C runs on the VeeR EL2 core through the full SoC path.
+
+### GPIO UVM Verification
+
+The project currently has one per-IP UVM VIP, for GPIO, with two separately
+selectable environments. Both use the installed VCS UVM 1.2 library, typed
+SystemVerilog interfaces, factory creation and `uvm_config_db::set/get`.
+
+| Flow | Stimulus owner | UVM checking |
+|---|---|---|
+| Active standalone (`uvm/gpio/`) | UVM bus and pin drivers directly exercise `gpio_wrapper` | Protocol assertions, pin/register scoreboard, coverage |
+| Software-driven passive (`uvm/gpio_sw/`) | C executes on VeeR through the width adapter and SoC fabric | Passive GPIO monitor/scoreboard, protocol assertions, software completion |
+
+In active mode, independent AW/W/B/AR/R driver workers support queued requests
+and channel overlap. The six tests cover registers, pins, strobes, invalid
+accesses, response backpressure, a factory override, and GPIO plan cases
+SOC-027/028/029. Plan tests add a resolved digital-pad model for loopback and
+intentional contention, with an explicit simulation-only DIR/OE probe.
+
+In passive mode, the agent creates **no drivers or sequencers**. Its virtual
+AXI interface contains read-only observation copies from the GPIO slave port;
+CPU fetches, RAM and UART traffic are excluded from the GPIO model. C performs
+register comparisons, while UVM independently checks observed accesses and
+pin behavior. `cfg` supplies interface handles/settings, not transaction data.
+
+The software path is:
+
+```text
+C program → ELF → RAM hex image → VeeR executes loads/stores
+         → 64-to-32 adapter → interconnect → GPIO
+                                            ↓
+                                 passive monitor → scoreboard
+```
+
+The preserved `sw/gpio_test/main.c` checks DIR, OUT patterns and IN=`0xA5`.
+The separate `sw/gpio_uvm_test/main.c` adds reset/upper-bit checks, walking-one,
+walking-zero, alternating/zero/ones patterns and per-bit direction switching.
+Each program runs in its own simulation. Both perform C-side comparisons and
+return zero only when those comparisons pass. `startup.S` converts the return
+value into a RAM status marker at `0x7FF0`: `0x50515353` for success or `0xDEAD`
+for failure. UVM also requires the UART success tag, ebreak observation and
+clean independent checking; the marker alone cannot establish success.
+
+```sh
+# Active GPIO tests: all six, or only the three spreadsheet GPIO cases.
+make -C uvm regression
+make -C uvm plan-regression
+
+# Passive UVM: original C, expanded C, or both programs.
+make -C uvm sw-gpio
+make -C uvm sw-gpio SW_PROGRAM=gpio_uvm_test
+make -C uvm sw-regression
+
+# Help for each flow; the original root Make targets remain available.
+make -C uvm help
+make -C uvm sw-help
+```
+
+November 7 results, VCS U-2023.03 / UVM 1.2:
+
+| Test | Result |
+|---|---|
+| Active smoke / pipeline / factory override | PASS: 845 / 2132 / 2544 checks |
+| SOC-027 / SOC-028 / SOC-029 active plan tests | PASS: 727 / 4403 / 5274 checks |
+| Passive original C | PASS: 38232 checks; 6 GPIO reads, 8 writes |
+| Passive expanded C | PASS: 83970 checks; 76 GPIO reads, 41 writes |
+| Passive original C with `HPM=0` | PASS: 38232 checks |
+| Deliberately failing C / injected output glitch | Correctly rejected with nonzero Make status |
+
+All positive UVM runs reported zero UVM warnings/errors/fatals. Counts include
+clock-by-clock comparisons; they do not measure verification-plan closure.
+The original non-UVM GPIO software test also passed after adding the optional
+harness completion mode used by UVM. Full non-GPIO software regressions were
+not rerun for that harness change.
+
+The passive software harness still supplies fixed external input `0xA5`.
+Software controls OUT/DIR but cannot drive physical input pins by writing
+read-only IN. External input sweeps/contention belong to the active pad-model
+tests; passive software bus-fault handling and reset-in-flight remain uncovered.
+The active VIP supports single-beat GPIO accesses and explicitly rejects
+mid-run reset. UVM for the other IPs and complete plan closure remain future work.
+
+See [the active VIP guide](uvm/README.md), [verification-plan mapping](uvm/PLAN_COVERAGE.md),
+[passive flow guide and results](uvm/gpio_sw/README.md), and
+[active waveform walkthrough](uvm/waves/README.md). The root
+[`verification_plan.xlsx`](verification_plan.xlsx) is a plan; proposed test
+names are not evidence that every checkpoint is implemented.
 
 ### Verification Results
 
@@ -153,7 +246,8 @@ At Level 3 the BFM is removed from the datapath and the VeeR EL2 core becomes th
 
 ### Requirements
 
-- Synopsys VCS, tested with `U-2023.03-SP1`
+- Synopsys VCS (GPIO UVM verified with `U-2023.03`)
+- Installed UVM 1.2 library for the UVM flows (`-ntb_opts uvm-1.2`)
 - Verdi for waveform inspection
 - `riscv64-unknown-elf-gcc`
 - `perl` for VeeR configuration
@@ -194,6 +288,23 @@ make verdi LEVEL=integration
 make verdi LEVEL=sw IP=<ip>
 ```
 
+The UVM flows have separate, automatically populated waveform views:
+
+```sh
+# Active GPIO: pins, resolved pads, registers, AXI and glitch-checker groups.
+make -C uvm gpio TEST=soc_gpio_dir_test WAVES=1
+make -C uvm verdi TEST=soc_gpio_dir_test
+
+# Passive software: core trace, completion, GPIO and CPU bus activity.
+make -C uvm sw-gpio SW_PROGRAM=gpio_uvm_test WAVES=1
+make -C uvm sw-verdi SW_PROGRAM=gpio_uvm_test
+```
+
+The viewers select wave-enabled outputs automatically; only generation needs
+`WAVES=1`. Match the test/program, seed and run root. The active view contains
+nine groups/46 entries; the passive view contains seven groups/59 entries.
+Both were restored and validated in Verdi batch mode.
+
 #### Clean build
 
 ```bash
@@ -204,13 +315,24 @@ rm -rf csrc
 The current flow gives each target its own compilation directory and explicit
 simulation top. The historical root `csrc` is not used by ordinary targets.
 Cleaning is unnecessary for the Phase 2 regression.
+`make clean` also removes UVM outputs under `run/`; preserve logs/waves needed
+for review before cleaning.
 
 ### Simulation Output
 
 ```text
 run/phase2/<target>/sim.log
 run/phase2_nohpm/<target>/sim.log
+run/uvm/gpio/<test>/seed_<seed>[_waves]/sim.log
+run/uvm/gpio_sw/<program>/seed_<seed>[_waves]/sim.log
+run/uvm/gpio_sw_nohpm/<program>/seed_<seed>[_waves]/sim.log
 ```
+
+UVM compile state is isolated per flow. The passive flow generates core
+configuration under its run root's `veer_config/`. `RUN_ROOT` overrides must
+be absolute; use separate passive roots for different HPM configurations.
+Software builds regenerate tracked `sw/common/soc_map.h`, so avoid concurrent
+software image builds and inspect the generated header's diff.
 
 ## Repository Structure
 
@@ -232,6 +354,12 @@ Honours_Project/
 ├── sw/
 │   ├── common/              # Startup, linker script, drivers
 │   └── *_test/              # Peripheral-specific software tests
+├── uvm/
+│   ├── gpio/                # Active standalone GPIO VIP and plan tests
+│   ├── gpio_sw/             # Separate C-driven passive UVM, waveform view
+│   ├── scripts/             # UVM log validator and its self-tests
+│   ├── waves/               # Active GPIO restore view and walkthrough
+│   └── PLAN_COVERAGE.md     # Spreadsheet checkpoint mapping and limits
 ├── scripts/                 # Build and generation scripts
 ├── doc/                     # Architecture, interface, and verification docs
 ├── run/                     # Simulation output
@@ -288,7 +416,10 @@ The following items remain to complete the project:
    collect CPU/NDA cycles and bus events across array sizes and configurations.
    No performance measurements have been collected in this implementation work.
 
-2. **UVM and broader coverage** — deferred until the directed baseline review.
+2. **Remaining UVM and broader coverage** — GPIO active and software-driven
+   passive UVM are now implemented; the
+   remaining work is per-IP VIPs for the other blocks, reset/protocol corner
+   cases, broader coverage and complete spreadsheet checkpoint closure.
 
 3. **Permanent-fault recovery architecture** — if required, define isolation
    and reset behavior for a slave that never returns outstanding responses.
@@ -301,7 +432,10 @@ The following items remain to complete the project:
 
 ## Limitations
 
-1. The interconnect serialises transactions through a single FSM. With two concurrent masters, CPU and NDA traffic serialise under round-robin arbitration. CPU latency while the NDA streams is bounded by one NDA burst; this affects the measured crossover and is documented in the results rather than hidden.
+1. The interconnect serialises transactions through a single FSM and holds
+   ownership through response completion. Arbitration is over AW/AR entries;
+   latency depends on requests, slave responses and backpressure. Burst length
+   alone does not establish a fixed CPU wait bound.
 
 2. Timer software testing uses polling. The timer interrupt line is observed by the testbench but is not yet serviced by software running on the core.
 

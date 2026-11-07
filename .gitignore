@@ -4,6 +4,9 @@
 # run/ is generated on demand by the Makefile; waves/ is tracked source.
 # =============================================================================
 
+# Local agent guidance is maintained in the workspace, outside version control.
+/AGENTS.md
+
 # -----------------------------------------------------------------------------
 # VCS compile and simulation outputs  (per-module subdirs under run/)
 # -----------------------------------------------------------------------------

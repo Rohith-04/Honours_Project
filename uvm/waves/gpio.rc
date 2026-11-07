@@ -1,0 +1,73 @@
+; GPIO UVM nWave restore file. Loaded automatically by make -C uvm verdi.
+; Paths are relative to the single FSDB top, tb_gpio_uvm.
+; No FSDB filename is saved here: the selected TEST/SEED supplies the dump.
+; See uvm/waves/README.md for a guided waveform walkthrough.
+windowTimeUnit 1ns
+signalSpacing 3
+
+addGroup "01_clock_reset"
+addSignal -h 15 $$top/clk
+addSignal -h 15 $$top/aresetn
+
+; Start here for SOC-027/028/029. Binary radix exposes individual X bits.
+addGroup "02_GPIO_pads_binary"
+addSignal -h 15 $$top/pins/pad_mode
+addSignal -h 15 -BIN $$top/pins/external_enable
+addSignal -h 15 -BIN $$top/pins/external_value
+addSignal -h 15 -BIN $$top/pins/output_enable
+addSignal -h 15 -BIN $$top/pins/gpio_out
+addSignal -h 15 -BIN $$top/pins/pad
+addSignal -h 15 -BIN $$top/pins/gpio_in
+addSignal -h 15 -BIN $$top/dut/in_sync
+
+addGroup "03_GPIO_registers"
+addSignal -h 15 -HEX $$top/dut/out_reg
+addSignal -h 15 -HEX $$top/dut/dir_reg
+addSignal -h 15 -BIN $$top/dut/in_sync
+; W: 0=IDLE, 1=DATA, 2=RESP. R: 0=IDLE, 1=RESP.
+addSignal -h 15 -UDEC $$top/dut/wstate
+addSignal -h 15 -UDEC $$top/dut/rstate
+
+addGroup "04_AXI_write_address_AW"
+addSignal -h 15 $$top/axi/awvalid
+addSignal -h 15 $$top/axi/awready
+addSignal -h 15 -HEX $$top/axi/awaddr
+addSignal -h 15 -HEX $$top/axi/awid
+addSignal -h 15 -UDEC $$top/axi/awlen
+addSignal -h 15 -UDEC $$top/axi/awsize
+addSignal -h 15 -BIN $$top/axi/awburst
+
+addGroup "05_AXI_write_data_W"
+addSignal -h 15 $$top/axi/wvalid
+addSignal -h 15 $$top/axi/wready
+addSignal -h 15 -HEX $$top/axi/wdata
+addSignal -h 15 -BIN $$top/axi/wstrb
+
+addGroup "06_AXI_write_response_B"
+addSignal -h 15 $$top/axi/bvalid
+addSignal -h 15 $$top/axi/bready
+addSignal -h 15 -HEX $$top/axi/bid
+; Response: 00=OKAY, 10=SLVERR.
+addSignal -h 15 -BIN $$top/axi/bresp
+
+addGroup "07_AXI_read_address_AR"
+addSignal -h 15 $$top/axi/arvalid
+addSignal -h 15 $$top/axi/arready
+addSignal -h 15 -HEX $$top/axi/araddr
+addSignal -h 15 -HEX $$top/axi/arid
+addSignal -h 15 -UDEC $$top/axi/arlen
+addSignal -h 15 -UDEC $$top/axi/arsize
+addSignal -h 15 -BIN $$top/axi/arburst
+
+addGroup "08_AXI_read_response_R"
+addSignal -h 15 $$top/axi/rvalid
+addSignal -h 15 $$top/axi/rready
+addSignal -h 15 -HEX $$top/axi/rid
+addSignal -h 15 -HEX $$top/axi/rdata
+addSignal -h 15 -BIN $$top/axi/rresp
+
+addGroup "09_output_glitch_checker"
+addSignal -h 15 -HEX $$top/observed_awaddr
+addSignal -h 15 -BIN $$top/allowed_changes
+addSignal -h 15 -BIN $$top/changed_this_edge
+addSignal -h 15 -BIN $$top/previous_output

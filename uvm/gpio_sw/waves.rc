@@ -1,0 +1,75 @@
+; Software-driven GPIO: CPU owns AXI; the VIP observes /axi and /pins.
+windowTimeUnit 1ns
+signalSpacing 3
+addGroup "01_clock_reset"
+addSignal -h 15 $$top/system/clk
+addSignal -h 15 $$top/system/aresetn
+
+addGroup "02_software_completion"
+addSignal -h 15 $$top/status/done
+addSignal -h 15 $$top/status/passed
+addSignal -h 15 $$top/status/uart_ok
+addSignal -h 15 $$top/status/ebreak_seen
+addSignal -h 15 -HEX $$top/status/signature
+addSignal -h 15 -HEX $$top/status/pc
+addSignal -h 15 $$top/system/tr_valid
+addSignal -h 15 -HEX $$top/system/tr_insn
+addSignal -h 15 $$top/system/tr_exc
+addSignal -h 15 $$top/system/uart_tx_mon
+
+addGroup "03_GPIO_pins_and_registers"
+addSignal -h 15 -BIN $$top/pins/gpio_in
+addSignal -h 15 -BIN $$top/pins/gpio_out
+addSignal -h 15 -BIN $$top/pins/output_enable
+addSignal -h 15 -HEX $$top/system/dut/u_gpio/out_reg
+addSignal -h 15 -HEX $$top/system/dut/u_gpio/dir_reg
+addSignal -h 15 -BIN $$top/system/dut/u_gpio/in_sync
+addSignal -h 15 -UDEC $$top/system/dut/u_gpio/wstate
+addSignal -h 15 -UDEC $$top/system/dut/u_gpio/rstate
+
+addGroup "04_GPIO_write_from_CPU"
+addSignal -h 15 $$top/axi/awvalid
+addSignal -h 15 $$top/axi/awready
+addSignal -h 15 -HEX $$top/axi/awaddr
+addSignal -h 15 -HEX $$top/axi/awid
+addSignal -h 15 $$top/axi/wvalid
+addSignal -h 15 $$top/axi/wready
+addSignal -h 15 -HEX $$top/axi/wdata
+addSignal -h 15 -BIN $$top/axi/wstrb
+addSignal -h 15 $$top/axi/bvalid
+addSignal -h 15 $$top/axi/bready
+addSignal -h 15 -HEX $$top/axi/bid
+addSignal -h 15 -BIN $$top/axi/bresp
+
+addGroup "05_GPIO_read_to_CPU"
+addSignal -h 15 $$top/axi/arvalid
+addSignal -h 15 $$top/axi/arready
+addSignal -h 15 -HEX $$top/axi/araddr
+addSignal -h 15 -HEX $$top/axi/arid
+addSignal -h 15 $$top/axi/rvalid
+addSignal -h 15 $$top/axi/rready
+addSignal -h 15 -HEX $$top/axi/rid
+addSignal -h 15 -HEX $$top/axi/rdata
+addSignal -h 15 -BIN $$top/axi/rresp
+
+addGroup "06_core_LSU_64bit"
+addSignal -h 15 $$top/system/lsu_awvalid
+addSignal -h 15 $$top/system/lsu_awready
+addSignal -h 15 -HEX $$top/system/lsu_awaddr
+addSignal -h 15 $$top/system/lsu_wvalid
+addSignal -h 15 $$top/system/lsu_wready
+addSignal -h 15 -HEX $$top/system/lsu_wdata
+addSignal -h 15 -BIN $$top/system/lsu_wstrb
+addSignal -h 15 $$top/system/lsu_arvalid
+addSignal -h 15 $$top/system/lsu_arready
+addSignal -h 15 -HEX $$top/system/lsu_araddr
+addSignal -h 15 -HEX $$top/system/lsu_rdata
+
+addGroup "07_instruction_fetch"
+addSignal -h 15 $$top/system/ifu_arvalid
+addSignal -h 15 $$top/system/ifu_arready
+addSignal -h 15 -HEX $$top/system/ifu_araddr
+addSignal -h 15 $$top/system/ifu_rvalid
+addSignal -h 15 $$top/system/ifu_rready
+addSignal -h 15 -HEX $$top/system/ifu_rdata
+addSignal -h 15 -UDEC $$top/system/u_adapter/state
