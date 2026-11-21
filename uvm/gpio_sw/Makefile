@@ -10,6 +10,7 @@ UVM_TEST ?= gpio_sw_test
 HPM ?= 1
 SEED ?= 1
 WAVES ?= 0
+AUTO_VERDI ?= 0
 SIM_ARGS ?=
 RUN_ROOT ?= $(PROJ_ROOT)/run/uvm/gpio_sw$(if $(filter 0,$(HPM)),_nohpm,)
 PROGRAM_DIR := $(if $(filter /%,$(SW_PROGRAM)),$(SW_PROGRAM),$(PROJ_ROOT)/sw/$(SW_PROGRAM))
@@ -72,6 +73,16 @@ gpio: compile
 	cd $(TEST_DIR) && $(BUILD_DIR)/simv -l sim.log +UVM_TESTNAME=$(UVM_TEST) \
 	    +SW_TEST=gpio +SW_HEX=test.hex +ntb_random_seed=$(SEED) $(SIM_ARGS)
 	python3 -B $(UVM_ROOT)/scripts/check_uvm.py $(TEST_DIR)/sim.log $(UVM_TEST)
+	@if [ "$(AUTO_VERDI)" = "1" ]; then \
+	    if [ "$(WAVES)" != "1" ]; then \
+	        echo "[make] AUTO_VERDI=1 requires WAVES=1 — rerun with WAVES=1 AUTO_VERDI=1"; exit 1; \
+	    fi; \
+	    echo "[make] opening Verdi automatically..."; \
+	    cd $(TEST_DIR) && $(VERDI_HOME)/bin/verdi \
+	        -dbdir $(BUILD_DIR)/simv.daidir \
+	        -ssf $(TEST_DIR)/tb_gpio_sw_uvm.fsdb \
+	        -sswr $(PASSIVE_ROOT)/waves.rc & \
+	fi
 
 compile: $(BUILD_DIR)/simv
 $(VEER_CONFIG): $(VEER_ROOT)/configs/veer.config $(VEER_ROOT)/tools/picmap $(PROJ_ROOT)/Makefile
@@ -109,9 +120,10 @@ help:
 	    'make -C uvm sw-regression                   Run both C programs' \
 	    'make -C uvm sw-gpio HPM=0                   Verify the 2x6 build' \
 	    'make -C uvm sw-gpio WAVES=1                 Generate software FSDB/KDB' \
+	    'make -C uvm sw-gpio WAVES=1 AUTO_VERDI=1    Simulate then open Verdi automatically' \
 	    'make -C uvm sw-verdi                        Open its saved waveform groups' \
 	    'Options: SW_PROGRAM (name in sw/ or absolute directory), SEED, HPM=0|1,' \
-	    'WAVES=0|1, RUN_ROOT=/absolute/path, SIM_ARGS, VCS_HOME, VERDI_HOME.' \
+	    'WAVES=0|1, AUTO_VERDI=0|1, RUN_ROOT=/absolute/path, SIM_ARGS, VCS_HOME, VERDI_HOME.' \
 	    'RUN_ROOT defaults to <project>/run/uvm/gpio_sw (gpio_sw_nohpm for HPM=0).' \
 	    'Software builds regenerate the tracked sw/common/soc_map.h.' \
 	    'See uvm/gpio_sw/README.md for ownership, coverage, and remaining limits.'

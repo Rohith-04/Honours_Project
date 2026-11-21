@@ -75,6 +75,7 @@ module tb_soc_sw #(
     else if (sw_test == "nda") tag_ok = "NDA OK";
     else if (sw_test == "hpm") tag_ok = "HPM OK";
     else if (sw_test == "wdt") tag_ok = "WDT OK";
+    else if (sw_test == "internal_exam") tag_ok = "INTERNAL_EXAM OK";
     else tag_ok = "UNKNOWN";
     $display("[tb_soc_sw] SW_TEST=%s expect_tag=\"%s\"", sw_test, tag_ok);
   end

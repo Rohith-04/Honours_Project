@@ -170,15 +170,21 @@ sw_FILES = $(SOC) $(UART_IP) $(XBAR) \
 sw_TOP := tb_soc_sw
 sw_VCSFLAGS := +define+RV_OPENSOURCE
 
+# Per-IP source directory overrides.
+# Tests that don't follow the sw/<ip>_test naming convention set their own path.
+# sw_srcdir evaluates to the override if defined, otherwise sw/<ip>_test.
+internal_exam_SRCDIR := $(PROJ_ROOT)/sw/internal_exam
+sw_srcdir = $(if $($(1)_SRCDIR),$($(1)_SRCDIR),$(PROJ_ROOT)/sw/$(1)_test)
+
 .PHONY: sw
 sw: $(VEER_BUILD)/common_defines.vh $(VEER_FLIST)
 	@test -s $(VEER_BUILD)/pic_map_auto.h || { echo "Missing/empty VeeR PIC map; regenerate the VeeR configuration"; exit 1; }
-	@if [ "$(IP)" != "gpio" -a "$(IP)" != "uart" -a "$(IP)" != "timer" -a "$(IP)" != "nda" -a "$(IP)" != "hpm" -a "$(IP)" != "wdt" ]; then \
-	    echo "usage: make sw IP=gpio|uart|timer|nda|hpm|wdt"; exit 1; fi
+	@if [ "$(IP)" != "gpio" -a "$(IP)" != "uart" -a "$(IP)" != "timer" -a "$(IP)" != "nda" -a "$(IP)" != "hpm" -a "$(IP)" != "wdt" -a "$(IP)" != "internal_exam" ]; then \
+	    echo "usage: make sw IP=gpio|uart|timer|nda|hpm|wdt|internal_exam"; exit 1; fi
 	@mkdir -p $(RUN_ROOT)/sw_$(IP)
 	@echo "[make] building SW image for $(IP)..."
 	HAVE_HPM=$(HPM) $(PROJ_ROOT)/scripts/build_sw.sh \
-	    $(PROJ_ROOT)/sw/$(IP)_test $(RUN_ROOT)/sw_$(IP)
+	    $(call sw_srcdir,$(IP)) $(RUN_ROOT)/sw_$(IP)
 	@echo "[make] compiling sw $(IP) (VeeR + SoC)..."
 	@RV_ROOT=$(VEER_ROOT) $(VCS) $(VCS_FLAGS) -top $(sw_TOP) -Mdir=$(RUN_ROOT)/sw_$(IP)/csrc $(sw_VCSFLAGS) $(DEFINES) $(SW_INCDIRS) \
 	    -l $(RUN_ROOT)/sw_$(IP)/compile.log \
@@ -256,11 +262,11 @@ verdi:
 	    $(VERDI) -dbdir $(RUN_ROOT)/integration/simv.daidir \
 	             -ssf $(RUN_ROOT)/integration/$(integration_TOP).fsdb & \
 	elif [ "$(LEVEL)" = "sw" ]; then \
-	    if [ "$(IP)" != "gpio" -a "$(IP)" != "uart" -a "$(IP)" != "timer" -a "$(IP)" != "nda" -a "$(IP)" != "hpm" -a "$(IP)" != "wdt" ]; then echo "sw needs IP=gpio|uart|timer|nda|hpm|wdt"; exit 1; fi; \
+	    if [ "$(IP)" != "gpio" -a "$(IP)" != "uart" -a "$(IP)" != "timer" -a "$(IP)" != "nda" -a "$(IP)" != "hpm" -a "$(IP)" != "wdt" -a "$(IP)" != "internal_exam" ]; then echo "sw needs IP=gpio|uart|timer|nda|hpm|wdt|internal_exam"; exit 1; fi; \
 	    $(MAKE) --no-print-directory $(VEER_BUILD)/common_defines.vh $(VEER_FLIST); \
 	    mkdir -p $(RUN_ROOT)/sw_$(IP); \
 	    echo "[make] building SW image for $(IP)..."; \
-	    HAVE_HPM=$(HPM) $(PROJ_ROOT)/scripts/build_sw.sh $(PROJ_ROOT)/sw/$(IP)_test $(RUN_ROOT)/sw_$(IP); \
+	    HAVE_HPM=$(HPM) $(PROJ_ROOT)/scripts/build_sw.sh $(call sw_srcdir,$(IP)) $(RUN_ROOT)/sw_$(IP); \
 	    echo "[make] compiling sw $(IP) with FSDB..."; \
 	    RV_ROOT=$(VEER_ROOT) $(VCS) $(VCS_FLAGS_VERDI) -top $(sw_TOP) -Mdir=$(RUN_ROOT)/sw_$(IP)/csrc $(sw_VCSFLAGS) $(DEFINES) $(SW_INCDIRS) \
 	        -l $(RUN_ROOT)/sw_$(IP)/compile.log \

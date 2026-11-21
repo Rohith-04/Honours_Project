@@ -1,58 +1,32 @@
-; Software-driven GPIO: CPU owns AXI; the VIP observes /axi and /pins.
+; uvm/gpio_sw/waves.rc -- nWave signal restore for the passive GPIO SW UVM flow.
+; Load: make -C uvm sw-verdi SW_PROGRAM=gpio_uvm_test (picked up automatically).
+; $$top resolves to tb_gpio_sw_uvm (the single FSDB top).
+;
+; Three groups:
+;   01_cpu_lsu_axi     -- 64-bit LSU write/read channel leaving VeeR; shows
+;                         which addresses C is accessing and the data values
+;   02_gpio_slave_port -- GPIO slave port at the crossbar output (m03); shows
+;                         the AXI transactions actually arriving at gpio_wrapper
+;   03_ext_vip         -- gpio_ext_monitor captured value, sequence index,
+;                         physical gpio_out and output_enable for correlation
+;
+; Hierarchy notes:
+;   $$top/system        -- tb_soc_sw instance (EXTERNAL_COMPLETION=1)
+;   $$top/system/u_adapter -- veer_axi_adapter
+;   $$top/system/dut/gen_xbar_2x7/u_xbar -- axi_interconnect_wrap_2x7
+;   $$top/uvm_test_top/ext_mon -- gpio_ext_monitor component
+;   $$top/pins          -- gpio_pin_if observation interface
 windowTimeUnit 1ns
 signalSpacing 3
-addGroup "01_clock_reset"
+
+; ============================================================================
+; Group 1: CPU LSU AXI (64-bit)
+; These are the raw signals leaving VeeR's load-store unit. Each C mmio_write
+; to GPIO appears here first. lsu_awaddr 0x1002_0000 = GPIO base.
+; ============================================================================
+addGroup "01_cpu_lsu_axi"
 addSignal -h 15 $$top/system/clk
 addSignal -h 15 $$top/system/aresetn
-
-addGroup "02_software_completion"
-addSignal -h 15 $$top/status/done
-addSignal -h 15 $$top/status/passed
-addSignal -h 15 $$top/status/uart_ok
-addSignal -h 15 $$top/status/ebreak_seen
-addSignal -h 15 -HEX $$top/status/signature
-addSignal -h 15 -HEX $$top/status/pc
-addSignal -h 15 $$top/system/tr_valid
-addSignal -h 15 -HEX $$top/system/tr_insn
-addSignal -h 15 $$top/system/tr_exc
-addSignal -h 15 $$top/system/uart_tx_mon
-
-addGroup "03_GPIO_pins_and_registers"
-addSignal -h 15 -BIN $$top/pins/gpio_in
-addSignal -h 15 -BIN $$top/pins/gpio_out
-addSignal -h 15 -BIN $$top/pins/output_enable
-addSignal -h 15 -HEX $$top/system/dut/u_gpio/out_reg
-addSignal -h 15 -HEX $$top/system/dut/u_gpio/dir_reg
-addSignal -h 15 -BIN $$top/system/dut/u_gpio/in_sync
-addSignal -h 15 -UDEC $$top/system/dut/u_gpio/wstate
-addSignal -h 15 -UDEC $$top/system/dut/u_gpio/rstate
-
-addGroup "04_GPIO_write_from_CPU"
-addSignal -h 15 $$top/axi/awvalid
-addSignal -h 15 $$top/axi/awready
-addSignal -h 15 -HEX $$top/axi/awaddr
-addSignal -h 15 -HEX $$top/axi/awid
-addSignal -h 15 $$top/axi/wvalid
-addSignal -h 15 $$top/axi/wready
-addSignal -h 15 -HEX $$top/axi/wdata
-addSignal -h 15 -BIN $$top/axi/wstrb
-addSignal -h 15 $$top/axi/bvalid
-addSignal -h 15 $$top/axi/bready
-addSignal -h 15 -HEX $$top/axi/bid
-addSignal -h 15 -BIN $$top/axi/bresp
-
-addGroup "05_GPIO_read_to_CPU"
-addSignal -h 15 $$top/axi/arvalid
-addSignal -h 15 $$top/axi/arready
-addSignal -h 15 -HEX $$top/axi/araddr
-addSignal -h 15 -HEX $$top/axi/arid
-addSignal -h 15 $$top/axi/rvalid
-addSignal -h 15 $$top/axi/rready
-addSignal -h 15 -HEX $$top/axi/rid
-addSignal -h 15 -HEX $$top/axi/rdata
-addSignal -h 15 -BIN $$top/axi/rresp
-
-addGroup "06_core_LSU_64bit"
 addSignal -h 15 $$top/system/lsu_awvalid
 addSignal -h 15 $$top/system/lsu_awready
 addSignal -h 15 -HEX $$top/system/lsu_awaddr
@@ -60,16 +34,52 @@ addSignal -h 15 $$top/system/lsu_wvalid
 addSignal -h 15 $$top/system/lsu_wready
 addSignal -h 15 -HEX $$top/system/lsu_wdata
 addSignal -h 15 -BIN $$top/system/lsu_wstrb
+addSignal -h 15 $$top/system/lsu_bvalid
+addSignal -h 15 $$top/system/lsu_bready
 addSignal -h 15 $$top/system/lsu_arvalid
 addSignal -h 15 $$top/system/lsu_arready
 addSignal -h 15 -HEX $$top/system/lsu_araddr
+addSignal -h 15 $$top/system/lsu_rvalid
+addSignal -h 15 $$top/system/lsu_rready
 addSignal -h 15 -HEX $$top/system/lsu_rdata
 
-addGroup "07_instruction_fetch"
-addSignal -h 15 $$top/system/ifu_arvalid
-addSignal -h 15 $$top/system/ifu_arready
-addSignal -h 15 -HEX $$top/system/ifu_araddr
-addSignal -h 15 $$top/system/ifu_rvalid
-addSignal -h 15 $$top/system/ifu_rready
-addSignal -h 15 -HEX $$top/system/ifu_rdata
-addSignal -h 15 -UDEC $$top/system/u_adapter/state
+; ============================================================================
+; Group 2: GPIO slave port at crossbar output (m03)
+; These signals arrive at gpio_wrapper after the crossbar routes the CPU
+; write. awaddr[11:0]: 0x000=OUT, 0x004=IN, 0x008=DIR.
+; wdata[7:0] is the byte written to the register (8-pin device).
+; ============================================================================
+addGroup "02_gpio_slave_port"
+addSignal -h 15 $$top/system/dut/gen_xbar_2x7/u_xbar/m03_axi_awvalid
+addSignal -h 15 $$top/system/dut/gen_xbar_2x7/u_xbar/m03_axi_awready
+addSignal -h 15 -HEX $$top/system/dut/gen_xbar_2x7/u_xbar/m03_axi_awaddr
+addSignal -h 15 $$top/system/dut/gen_xbar_2x7/u_xbar/m03_axi_wvalid
+addSignal -h 15 $$top/system/dut/gen_xbar_2x7/u_xbar/m03_axi_wready
+addSignal -h 15 -HEX $$top/system/dut/gen_xbar_2x7/u_xbar/m03_axi_wdata
+addSignal -h 15 -BIN $$top/system/dut/gen_xbar_2x7/u_xbar/m03_axi_wstrb
+addSignal -h 15 $$top/system/dut/gen_xbar_2x7/u_xbar/m03_axi_bvalid
+addSignal -h 15 $$top/system/dut/gen_xbar_2x7/u_xbar/m03_axi_bready
+addSignal -h 15 -BIN $$top/system/dut/gen_xbar_2x7/u_xbar/m03_axi_bresp
+addSignal -h 15 $$top/system/dut/gen_xbar_2x7/u_xbar/m03_axi_arvalid
+addSignal -h 15 $$top/system/dut/gen_xbar_2x7/u_xbar/m03_axi_arready
+addSignal -h 15 -HEX $$top/system/dut/gen_xbar_2x7/u_xbar/m03_axi_araddr
+addSignal -h 15 $$top/system/dut/gen_xbar_2x7/u_xbar/m03_axi_rvalid
+addSignal -h 15 $$top/system/dut/gen_xbar_2x7/u_xbar/m03_axi_rready
+addSignal -h 15 -HEX $$top/system/dut/gen_xbar_2x7/u_xbar/m03_axi_rdata
+addSignal -h 15 -BIN $$top/system/dut/gen_xbar_2x7/u_xbar/m03_axi_rresp
+
+; ============================================================================
+; Group 3: External VIP captured data
+; captured: value recorded by gpio_ext_monitor on each qualifying transition.
+; seq_index: advances each time a capture is made (0..21).
+; gpio_out: physical output pins from gpio_wrapper (driven by OUT & DIR).
+; output_enable: wired from dut.dir_reg (all-ones = all outputs).
+; Correlate captured vs gpio_out to confirm the VIP is sampling correctly.
+; ============================================================================
+addGroup "03_ext_vip"
+addSignal -h 15 -HEX $$top/uvm_test_top/ext_mon/captured
+addSignal -h 15 -UDEC $$top/uvm_test_top/ext_mon/seq_index
+addSignal -h 15 -BIN $$top/pins/gpio_out
+addSignal -h 15 -BIN $$top/pins/output_enable
+addSignal -h 15 -HEX $$top/system/dut/u_gpio/out_reg
+addSignal -h 15 -HEX $$top/system/dut/u_gpio/dir_reg
